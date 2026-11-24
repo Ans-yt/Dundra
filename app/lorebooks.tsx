@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { BookOpen, ChevronDown, Download, Plus, Trash2, Upload } from "lucide-react";
 import { blankLoreEntry, lorebookFileLimit, loreEntryLimit, type Lorebook, type LoreEntry, type LoreScope } from "../lib/lorebook";
+import { AppAlert } from "./alerts";
+import { readResponse } from "./request";
+import { networkProblem, type Problem } from "../lib/diagnostics";
 import { LoreEntryFields } from "./lore-entry-fields";
 import { SettingsSwitch } from "./setting-help";
 import { PresetDialog } from "./preset-dialog";
@@ -16,16 +19,14 @@ async function read<T>(query = "", body?: object): Promise<T> {
   const response = await fetch(api + query, body ? {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   } : { cache: "no-store" });
-  const result = await response.json();
-  if (!response.ok) throw Error(result.error || "Could not update lorebooks.");
-  return result;
+  return readResponse<T>(response);
 }
 
 function changed() { window.dispatchEvent(new Event("lorebooks-change")); }
 
 function useBooks(query: string, enabled = true, refreshKey?: string | null) {
   const [data, setData] = useState(empty);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let active = true;
@@ -33,8 +34,8 @@ function useBooks(query: string, enabled = true, refreshKey?: string | null) {
     function refresh() {
       const current = ++revision;
       read<Links>(query).then(result => {
-        if (active && revision === current) { setData(result); setError(""); }
-      }).catch(cause => { if (active && revision === current) setError(cause.message); });
+        if (active && revision === current) { setData(result); setError(null); }
+      }).catch(cause => { if (active && revision === current) setError(networkProblem(cause, "Load lorebooks")); });
     }
     refresh();
     window.addEventListener("lorebooks-change", refresh);
@@ -47,7 +48,7 @@ export function LoreLinks({ scope, id, contextKey, disabled }: { scope: LoreScop
   const [open, setOpen] = useState(false);
   const [manage, setManage] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const query = "?" + new URLSearchParams({ scope, owner: id });
   const { data, error: loadError, setData } = useBooks(query, scope === "chat" || open, contextKey);
   const active = data.books.filter(book => data.direct.includes(book.id) || data.inherited.includes(book.id));
@@ -57,7 +58,7 @@ export function LoreLinks({ scope, id, contextKey, disabled }: { scope: LoreScop
         <span>{scope === "persona" ? "Linked lorebooks" : "Lorebooks"}{scope === "chat" ? ": " + (active.length === 1 ? active[0].name : active.length || "None") : ""}</span>
         <ChevronDown size={13} aria-hidden="true" /></summary>
       <div className="lore-menu">
-        {(error || loadError) && <p role="alert" className="error">{error || loadError}</p>}
+        {(error || loadError) && <AppAlert {...(error || loadError)!} />}
         {!data.books.length && <p>No lorebooks yet.</p>}
         {data.books.map(book => {
           const linked = data.direct.includes(book.id);
@@ -65,10 +66,10 @@ export function LoreLinks({ scope, id, contextKey, disabled }: { scope: LoreScop
           return <label className="lore-link-option" key={book.id}>
             <input type="checkbox" checked={linked || inherited} disabled={disabled || busy || book.id === data.memoryBookId || (inherited && !linked)} onChange={async () => {
               setBusy(true);
-              setError("");
+              setError(null);
               setData({ ...data, direct: linked ? data.direct.filter(key => key !== book.id) : [...data.direct, book.id] });
               try { await read("", { action: "link", scope, owner: id, id: book.id, enabled: !linked }); changed(); }
-              catch (cause) { setData(data); setError((cause as Error).message); }
+              catch (cause) { setData(data); setError(networkProblem(cause, "Update lorebook link")); }
               finally { setBusy(false); }
             }} /><span>{book.name}{book.id === data.memoryBookId ? <small>Lorebook memory for this chat</small> : inherited && <small>Linked through a character or persona</small>}</span>
           </label>;
@@ -91,24 +92,24 @@ export function LorebookEditor({ chatId, initialBook, create, onSaved }: {
     let active = true;
     read<Lorebook>("?book=" + encodeURIComponent(initialBook)).then(item => {
       if (active) setBook(item);
-    }).catch(cause => { if (active) setError(cause.message); }).finally(() => { if (active) setOpening(false); });
+    }).catch(cause => { if (active) setError(networkProblem(cause, "Open lorebook")); }).finally(() => { if (active) setOpening(false); });
     return () => { active = false; };
   }, [initialBook]);
   const [saving, setSaving] = useState(false);
   const [readingImages, setReadingImages] = useState(false);
   const busy = saving || readingImages || opening;
   const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   const [query, setQuery] = useState("");
   const [openEntry, setOpenEntry] = useState<string>();
 
   async function perform(run: () => Promise<void>) {
     setSaving(true);
-    setError("");
+    setError(null);
     setStatus("");
     try { await run(); }
-    catch (cause) { setError((cause as Error).message); }
+    catch (cause) { setError(networkProblem(cause, "Lorebook editor")); }
     finally { setSaving(false); }
   }
 
@@ -137,7 +138,7 @@ export function LorebookEditor({ chatId, initialBook, create, onSaved }: {
         <button type="button" className="secondary" disabled={busy} onClick={() => {
           setQuery(""); setOpenEntry(undefined);
           setBook({ id: "", name: "", scan_depth: 4, entries: [] });
-          setDeletePending(false); setStatus(""); setError("");
+          setDeletePending(false); setStatus(""); setError(null);
         }}><Plus size={16} /> New lorebook</button>
         <label className="secondary advanced-upload"><Upload size={16} /> <span>Import JSON</span>
           <input type="file" accept=".json,application/json" aria-label="Import lorebook JSON" disabled={busy} onChange={event => {
@@ -156,8 +157,8 @@ export function LorebookEditor({ chatId, initialBook, create, onSaved }: {
         </label>
       </div>
       </div>
-      {(error || loadError) && <p role="alert" className="error">{error || loadError}</p>}
-      {status && <p role="status">{status}</p>}
+      {(error || loadError) && <AppAlert {...(error || loadError)!} />}
+      {status && <AppAlert tone="success" message={status} dismiss={() => setStatus("")} />}
     </section>
 
     {book && <section className="settings-panel lore-book-form">

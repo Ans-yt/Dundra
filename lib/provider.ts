@@ -1,6 +1,7 @@
 import type { Message } from "./types";
 import type { GenerationSettings } from "./generation";
 import { RequestError } from "./http";
+import { DiagnosticError, diagnosticText, networkProblem } from "./diagnostics";
 
 import { mediaParts } from "./attachment";
 import type { ChatBonus } from "./chat-bonus";
@@ -9,17 +10,49 @@ import { allowsFunctions, headersForEndpoint } from "./chat-bonus";
 import { postProcessPrompt } from "./prompt-post-processing";
 type Prompt = { role: "system" | Message["role"]; content: string; media?: string | string[]; example?: boolean };
 
+
+function providerMessage(error: unknown, secrets: string[]) {
+  const value = typeof error === "object" && error !== null ? error as Record<string, unknown> : { message: error };
+  return diagnosticText([value.code, value.message].filter(part => typeof part === "string" || typeof part === "number").join(" · "), secrets);
+}
+
+async function providerDetails(response: Response, operation: string, secrets: string[]) {
+  const status = operation + " returned HTTP " + response.status + ".";
+  if (!response.body || !response.headers.get("content-type")?.includes("json")) {
+    void response.body?.cancel().catch(() => {});
+    return status;
+  }
+  const reader = response.body.getReader();
+  const timer = setTimeout(() => { void reader.cancel().catch(() => {}); }, 1500);
+  const decoder = new TextDecoder();
+  let raw = "";
+  try {
+    while (raw.length < 8192) {
+      const part = await reader.read();
+      if (part.done) {
+        const body = JSON.parse(raw + decoder.decode());
+        const details = providerMessage(body?.error ?? { message: body?.message }, secrets);
+        return details ? status + "\n" + details : status;
+      }
+      if (part.value.byteLength > 8192) break;
+      raw += decoder.decode(part.value, { stream: true });
+    }
+  } catch { /* The provider status is sufficient if its error body is unavailable. */ }
+  finally { clearTimeout(timer); void reader.cancel().catch(() => {}); reader.releaseLock(); }
+  return status;
+}
+
 export async function listModels(endpoint: string, key: string, signal: AbortSignal) {
   const response = await fetch(endpoint + "/models", {
     headers: { Accept: "application/json", ...(key ? { Authorization: "Bearer " + key } : {}) },
     cache: "no-store", redirect: "error", signal,
-  }).catch(() => { throw new RequestError("Could not load models. Check the base URL and make sure the provider is running.", 502); });
+  }).catch(cause => { throw new RequestError("Could not load models. Check the base URL and make sure the provider is running.", 502, networkProblem(cause, "Model list request").details); });
   if (!response.ok || !response.body) {
-    await response.body?.cancel();
+    const details = await providerDetails(response, "Model list", [key]);
     if (response.status === 401 || response.status === 403) {
-      throw new RequestError("The provider denied the model list (HTTP " + response.status + "). Check your API key.", 502);
+      throw new RequestError("The provider denied the model list (HTTP " + response.status + "). Check your API key.", 502, details);
     }
-    throw new RequestError("The provider could not list models (HTTP " + response.status + "). You can enter a model name manually.", 502);
+    throw new RequestError("The provider could not list models (HTTP " + response.status + "). You can enter a model name manually.", 502, details);
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -129,14 +162,16 @@ async function* readStream(base: string, headers: Headers, payload: object, sign
     method: "POST", headers, body: JSON.stringify(payload),
     signal: AbortSignal.any([signal, AbortSignal.timeout(900_000)]),
     redirect: "error",
-  }).catch(() => { throw new Error("Could not reach the model endpoint. Check the URL and that the provider is running."); });
+  }).catch(cause => { throw new DiagnosticError("Could not reach the model endpoint. Check the URL and that the provider is running.",
+    networkProblem(cause, "Model request").details, { cause }); });
+  const secrets = Array.from(headers, ([name, value]) => name === "content-type" ? "" : value.replace(/^Bearer\s+/i, ""));
   if (!response.ok || !response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
-    await response.body?.cancel();
+    const details = await providerDetails(response, "Chat completion", secrets);
     if (response.status === 401 || response.status === 403) {
-      throw new Error("The provider denied the request (HTTP " + response.status + "). Check the API key and model access.");
+      throw new DiagnosticError("The provider denied the request (HTTP " + response.status + "). Check the API key and model access.", details);
     }
-    if (response.status === 429) throw new Error("The provider is rate-limiting this model. Try again shortly or choose another model.");
-    throw new Error("The model endpoint did not return a reply stream (HTTP " + response.status + "). Check the model, token limits, and supported generation controls.");
+    if (response.status === 429) throw new DiagnosticError("The provider is rate-limiting this model. Try again shortly or choose another model.", details);
+    throw new DiagnosticError("The model endpoint did not return a reply stream (HTTP " + response.status + "). Check the model, token limits, and supported generation controls.", details);
   }
 
   const reader = response.body.getReader();
@@ -156,7 +191,8 @@ async function* readStream(base: string, headers: Headers, payload: object, sign
         const data = line.slice(5).trim();
         if (data === "[DONE]") return;
         const payload = JSON.parse(data);
-        if (payload.error) throw new Error("The provider reported a generation error.");
+        if (payload.error) throw new DiagnosticError("The provider reported a generation error.",
+          providerMessage(payload.error, secrets) || "The stream contained a provider error without a message.");
         const choice = payload.choices?.[0];
         if (choice?.finish_reason) finished = true;
         for (const fragment of choice?.delta?.tool_calls ?? []) {
@@ -182,7 +218,8 @@ async function* readStream(base: string, headers: Headers, payload: object, sign
       }
       if (done) break;
     }
-    if (!finished) throw new Error("The model stream ended before the reply was complete.");
+    if (!finished) throw new DiagnosticError("The model stream ended before the reply was complete.",
+      "The provider closed the event stream before sending a completion marker.");
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();

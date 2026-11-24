@@ -1,5 +1,8 @@
 "use client";
 
+import { AppAlert } from "./alerts";
+import { readResponse } from "./request";
+import { networkProblem, type Problem } from "../lib/diagnostics";
 import { useEffect, useState } from "react";
 import { downloadJson } from "./tavern-editors";
 import { RegexList } from "./regex-list";
@@ -27,18 +30,17 @@ export function AdvancedControls({ config, inChat = false, profilePreset = "" }:
   const pinned = profilePreset && config.library.some(entry => entry.name === profilePreset);
   const cfg = pinned ? { ...config, selected: profilePreset, presets: true } : config;
   const [busy,setBusy] = useState(false);
-  const [error,setError] = useState("");
+  const [error,setError] = useState<Problem | null>(null);
   const [pendingPreset, setPendingPreset] = useState<{ name: string; preset: Preset; scripts: Rule[] } | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
   const [importVersion, setImportVersion] = useState(0);
   async function save(patch: Partial<Advanced>) {
-    setError("");setBusy(true);
+    setError(null);setBusy(true);
     try {
       const res = await fetch("/api/advanced",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});
-      const data = await res.json();
-      if (!res.ok) throw Error(data.error);
+      const data = await readResponse<Advanced>(res);
       window.dispatchEvent(new CustomEvent("advanced-change",{detail:data})); return true;
-    } catch(e) {setError(String(e));return false;} finally { setBusy(false); }
+    } catch(e) {setError(networkProblem(e, "Save advanced settings"));return false;} finally { setBusy(false); }
   }
 
   async function addPreset(entry: SavedPreset) {
@@ -63,7 +65,7 @@ export function AdvancedControls({ config, inChat = false, profilePreset = "" }:
           if (scripts.length) setPendingPreset({ name, preset, scripts });
           else await addPreset({ name, preset });
         }
-      } catch(e) {setError(String(e));}
+      } catch(e) {setError(networkProblem(e, "Import settings file"));}
     }}/></label>;
   }
   const selected = cfg.presets ? cfg.library.find(entry => entry.name === cfg.selected) : undefined;
@@ -76,7 +78,7 @@ export function AdvancedControls({ config, inChat = false, profilePreset = "" }:
   return <section className="settings-panel advanced-controls"><h2>Advanced</h2>
     {!inChat && toggle("enabled", "Enable advanced mode")}
     {cfg.enabled && <>{!pinned && toggle("presets", "Chat Completion presets")}
-      {cfg.presets && <div className="transfer-actions">{file("library")}{!pinned && <button className="secondary" type="button" disabled={busy} onClick={() => { setNewName(""); setError(""); }}>New preset</button>}</div>}
+      {cfg.presets && <div className="transfer-actions">{file("library")}{!pinned && <button className="secondary" type="button" disabled={busy} onClick={() => { setNewName(""); setError(null); }}>New preset</button>}</div>}
       {cfg.presets && <>
       <label>{pinned ? "Model profile preset" : "Active preset"}<select value={cfg.selected} disabled={busy || !!pinned} onChange={e=>void save({selected:e.target.value})}><option value="">Use Dundra settings</option>{cfg.library.map(p=><option key={p.name}>{p.name}</option>)}</select></label>
       {selected && <>
@@ -103,7 +105,7 @@ export function AdvancedControls({ config, inChat = false, profilePreset = "" }:
           [...cfg.rules, presetRules[index]]) }} />}
       {cfg.rules.length>0 && <button type="button" className="secondary" onClick={()=>downloadJson("regex-scripts",cfg.rules)}>Export regex scripts</button>}
     </>}{toggle("audio","Audio attachments")}{toggle("video","Video attachments")}</>}
-    {error && !pendingPreset && <p className="error" role="alert">{error}</p>}
+    {error && !pendingPreset && <AppAlert {...error} />}
     {newName !== null && <PresetDialog compact title="New preset" close={() => setNewName(null)}>
       <form className="form new-chat-form" onSubmit={async event => {
         event.preventDefault();
@@ -111,14 +113,14 @@ export function AdvancedControls({ config, inChat = false, profilePreset = "" }:
         const order = ["main", "worldInfoBefore", "charDescription", "charPersonality", "scenario", "personaDescription", "worldInfoAfter", "dialogueExamples", "chatHistory"].map(identifier => ({ identifier, enabled: true }));
         if (await save({ selected: name, library: [...cfg.library, { name, preset: { prompts: [{ identifier: "main", name: "Main prompt", role: "system", content: "" }], prompt_order: [{ character_id: 100001, order }] } }] })) setNewName(null);
       }}><label>Preset name<input autoFocus required maxLength={100} value={newName} onChange={event => setNewName(event.target.value)}/></label>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <AppAlert {...error} />}
       <button type="submit" className="primary" disabled={busy || !newName.trim() || cfg.library.some(entry => entry.name === newName.trim())}>Create preset</button></form>
     </PresetDialog>}
     {pendingPreset && <PresetDialog title="Bundled regex scripts" close={() => { if (!busy) setPendingPreset(null); }}>
       <div className="preset-import-content">
         <p><strong>{pendingPreset.name}</strong> includes {pendingPreset.scripts.length} {pendingPreset.scripts.length === 1 ? "script" : "scripts"}. Enabled scripts can change messages or the prompts sent to the model while this preset is active.</p>
         <ul>{pendingPreset.scripts.map((rule, index) => <li key={index}><span>{rule.scriptName}</span><small>{rule.disabled ? "Off in file" : "On in file"}</small></li>)}</ul>
-        {error && <p className="error" role="alert">{error}</p>}
+        {error && <AppAlert {...error} />}
       </div>
       <footer className="preset-dialog-actions">
         <button type="button" className="quiet" disabled={busy} onClick={() => setPendingPreset(null)}>Cancel</button>

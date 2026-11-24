@@ -6,7 +6,7 @@ import { withEmbeddedLore } from "../../../lib/lorebook";
 import { attachmentKinds } from "../../../lib/attachment";
 import { arrangePreset } from "../../../lib/preset-prompt";
 import { beginMemorySummary, connectionAdvanced, originalFields, loreTiming, character, linkedChatLorebooks, chatModelConnection, chatOptions, conversation, finishReply, generationConfig, memoryStatus, persona, type ReplyAction } from "../../../lib/store";
-import { failure, field, fields, RequestError } from "../../../lib/http";
+import { errorDiagnostic, failure, field, fields, RequestError } from "../../../lib/http";
 import { generate } from "../../../lib/provider";
 import { after } from "next/server";
 import { summarizeChat } from "../../../lib/summarize-chat";
@@ -135,7 +135,7 @@ export async function POST(request: Request) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        const emit = (event: { delta?: string; reasoning?: string; thinkingMs?: number; display?: string; done?: true; draft?: string; automationIds?: string[]; error?: string }) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+        const emit = (event: { delta?: string; reasoning?: string; thinkingMs?: number; display?: string; done?: true; draft?: string; automationIds?: string[]; error?: string; details?: string }) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
         let publishTimer: ReturnType<typeof setTimeout> | undefined;
         try {
           let reply = "";
@@ -235,7 +235,10 @@ export async function POST(request: Request) {
             }
           }
         } catch (error) {
-          if (!signal.aborted) emit({ error: error instanceof Error && !(error instanceof SyntaxError) ? error.message : "The model sent an invalid reply stream." });
+          if (!signal.aborted) emit({
+            error: error instanceof Error && !(error instanceof SyntaxError) ? error.message : "The model sent an invalid reply stream.",
+            details: errorDiagnostic(error, "Model reply"),
+          });
         } finally {
           clearTimeout(publishTimer);
           if (!abort.signal.aborted) controller.close();

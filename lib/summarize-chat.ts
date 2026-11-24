@@ -1,3 +1,4 @@
+import { errorDiagnostic } from "./http";
 import { beginMemorySummary, connectionAdvanced, finishMemorySummary, generationConfig } from "./store";
 import { chatHistoryText, expandNames, stripAssistantThoughts } from "./chat-text";
 import { generate } from "./provider";
@@ -57,6 +58,9 @@ export async function summarizeChat(chatId: string, job: NonNullable<ReturnType<
       keys, content: memory.slice(0, 4000), position: "after_char" as const, match_whole_words: true, excludeRecursion: true, preventRecursion: true } : undefined;
     finishMemorySummary(chatId, job, { summary, entry });
   } catch (cause) {
-    finishMemorySummary(chatId, job, undefined, cause instanceof Error ? cause.message.slice(0, 240) : "Could not generate a summary.");
+    finishMemorySummary(chatId, job, undefined, {
+      message: cause instanceof Error ? cause.message.slice(0, 240) : "Could not generate a summary.",
+      details: errorDiagnostic(cause, "Memory summary"),
+    });
   }
 }

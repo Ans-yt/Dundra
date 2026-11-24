@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { AppAlert } from "./alerts";
+import type { Problem } from "../lib/diagnostics";
 import { ArrowLeft, ArrowUp, Cpu, Settings2, Square } from "lucide-react";
 import type { ChatSession, Persona } from "../lib/types";
 import { chatHistoryText, expandNames, personaText } from "../lib/chat-text";
@@ -28,7 +30,8 @@ type ChatWorkspaceProps = {
   draft: string;
   preview: ReplyPreview | null;
   locked: boolean;
-  error: string;
+  error: Problem | null;
+  onDismissError: () => void;
   onBack: () => void;
   onImport: (file: File) => void;
   onRename: () => void;
@@ -48,7 +51,7 @@ type ChatWorkspaceProps = {
   onStop: () => void;
 };
 
-export function ChatWorkspace({ session, advanced, personas, draft, preview, locked, error, onBack, onImport, onRename, onDelete, onDeleteFrom,
+export function ChatWorkspace({ session, advanced, personas, draft, preview, locked, error, onDismissError, onBack, onImport, onRename, onDelete, onDeleteFrom,
   onPersona, onSavePersona, onModelsChanged, onThinking, onSettings, onSummarize, onEdit, onVariant, onFork, onDraft, onReply, onStop }: ChatWorkspaceProps) {
   const { chat, messages, preferences } = session;
   const { provider } = preferences;
@@ -248,13 +251,13 @@ export function ChatWorkspace({ session, advanced, personas, draft, preview, loc
     </div>
 
     <div className="chat-dock">
-      {error && !panelOpen && <p className="error" role="alert">{error}</p>}
+      {error && !panelOpen && <AppAlert {...error} dismiss={onDismissError} />}
       <div className="chat-dock-meta">
         {!provider.model && <p className="chat-model-hint" role="status">Choose a model in Chat settings to send messages.</p>}
         <span className="chat-history-count">History <TokenCount value={historyTokens} label="Chat history" /></span>
       </div>
       <form className="chat-composer" ref={composer} onSubmit={(event) => { event.preventDefault(); void send(); }}>
-        {fileError && <p role="alert">{fileError}</p>}
+        {fileError && <AppAlert message={fileError} tone="warning" />}
         {attachment && preview?.mode !== "send" && <div className="attached-file">{attachment.url.startsWith("data:image/") && <img src={attachment.url} alt="Attachment preview"/>}{attachment.name}<button className="quiet" type="button" disabled={locked} onClick={()=>setAttachment(null)}>Remove</button></div>}
         <textarea ref={input} aria-label="Your message" placeholder="Enter to send · Shift+Enter for a new line" rows={1} maxLength={8000}
           readOnly={locked} value={draft} onChange={(event) => onDraft(event.target.value)} onKeyDown={(event) => {
@@ -292,7 +295,7 @@ export function ChatWorkspace({ session, advanced, personas, draft, preview, loc
       <p className="preset-import-content">{deleteIndex === messages.length - 1
         ? "This message will be permanently deleted."
         : `This message and ${messages.length - deleteIndex - 1} later ${deleteIndex === messages.length - 2 ? "message" : "messages"} will be permanently deleted.`}</p>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <AppAlert {...error} /> }
       <footer className="preset-dialog-actions">
         <button type="button" className="quiet" disabled={locked} onClick={() => setDeleteTarget(null)}>Cancel</button>
         <button type="button" className="secondary danger" disabled={locked} onClick={async () => {

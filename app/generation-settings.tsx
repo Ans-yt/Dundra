@@ -1,5 +1,8 @@
 "use client";
 
+import { AppAlert } from "./alerts";
+import { readResponse } from "./request";
+import { networkProblem, type Problem } from "../lib/diagnostics";
 import { useEffect, useState, type FormEvent } from "react";
 import { defaultGeneration, generationRanges, type GenerationConfig, type GenerationNumber, type GenerationSettings } from "../lib/generation";
 
@@ -28,11 +31,7 @@ function NumberControl({ name, value, change }: { name: GenerationNumber; value:
   </div>;
 }
 
-async function read(response: Response): Promise<GenerationConfig> {
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || "Could not save generation settings.");
-  return body;
-}
+const read = readResponse<GenerationConfig>;
 
 export function PromptSettings({ presets = false, promptsOnly = false, initialPrompt = "", onSaved }: {
   presets?: boolean; promptsOnly?: boolean; initialPrompt?: string; onSaved?: (config: GenerationConfig) => void;
@@ -44,8 +43,8 @@ export function PromptSettings({ presets = false, promptsOnly = false, initialPr
   const [promptId, setPromptId] = useState("");
   const [promptName, setPromptName] = useState("");
   const [promptText, setPromptText] = useState("");
-  const [promptFeedback, setPromptFeedback] = useState<{ message: string; error?: boolean } | null>(null);
-  const [error, setError] = useState("");
+  const [promptFeedback, setPromptFeedback] = useState<(Problem & { error?: boolean }) | null>(null);
+  const [error, setError] = useState<Problem | null>(null);
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(true);
   const [reload, setReload] = useState(0);
@@ -53,7 +52,7 @@ export function PromptSettings({ presets = false, promptsOnly = false, initialPr
   useEffect(() => {
     const controller = new AbortController();
     setPending(true);
-    setError("");
+    setError(null);
     fetch("/api/generation", { cache: "no-store", signal: controller.signal }).then(read)
       .then((saved) => {
         if (controller.signal.aborted) return;
@@ -62,7 +61,7 @@ export function PromptSettings({ presets = false, promptsOnly = false, initialPr
         const prompt = saved.prompts.find(item => item.id === initialPrompt);
         if (prompt) { setPromptId(prompt.id); setPromptName(prompt.name); setPromptText(prompt.content); }
       })
-      .catch((cause: Error) => { if (!controller.signal.aborted) setError(cause.message); })
+      .catch((cause: Error) => { if (!controller.signal.aborted) setError(networkProblem(cause, "Load prompts and presets")); })
       .finally(() => { if (!controller.signal.aborted) setPending(false); });
     return () => controller.abort();
   }, [reload, initialPrompt]);
@@ -70,7 +69,7 @@ export function PromptSettings({ presets = false, promptsOnly = false, initialPr
   async function save(action: "save" | "preset" | "delete") {
     if (pending) return;
     setPending(true);
-    setError("");
+    setError(null);
     setNotice("");
     try {
       const saved = await read(await fetch("/api/generation", {
@@ -83,7 +82,7 @@ export function PromptSettings({ presets = false, promptsOnly = false, initialPr
       if (action === "delete") setPreset("");
       setNotice(action === "save" ? "Generation settings saved." : action === "preset" ? "Preset saved and applied." : "Preset removed.");
       onSaved?.(saved);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save generation settings."); }
+    } catch (cause) { setError(networkProblem(cause, "Save generation settings")); }
     finally { setPending(false); }
   }
 
@@ -117,12 +116,12 @@ export function PromptSettings({ presets = false, promptsOnly = false, initialPr
         setPromptFeedback({ message: "Prompt removed from the library." });
       }
       onSaved?.(saved);
-    } catch (cause) { setPromptFeedback({ message: cause instanceof Error ? cause.message : "Could not update the prompt.", error: true }); }
+    } catch (cause) { setPromptFeedback({ ...networkProblem(cause, "Update prompt"), error: true }); }
     finally { setPending(false); }
   }
 
   if (!config) return pending ? <p className="notice" role="status">Loading prompts and presets…</p>
-    : <><p className="error" role="alert">{error}</p><button className="secondary" onClick={() => setReload((value) => value + 1)}>Try again</button></>;
+    : <>{error && <AppAlert {...error} />}<button className="secondary" onClick={() => setReload((value) => value + 1)}>Try again</button></>;
 
   const update = (key: keyof GenerationSettings, value: string | number) => {
     setDraft((settings) => ({ ...settings, [key]: value }));
@@ -155,7 +154,8 @@ export function PromptSettings({ presets = false, promptsOnly = false, initialPr
           }}>Remove prompt</button>
         </>}
       </div>
-      {promptFeedback && <p className={promptFeedback.error ? "error" : "notice"} role={promptFeedback.error ? "alert" : "status"}>{promptFeedback.message}</p>}
+      {promptFeedback && <AppAlert message={promptFeedback.message} details={promptFeedback.details}
+        tone={promptFeedback.error ? "error" : "success"} dismiss={() => setPromptFeedback(null)} />}
     </section>
     {presets && <section className="settings-panel">
       <h2>Presets</h2>
@@ -200,8 +200,8 @@ export function PromptSettings({ presets = false, promptsOnly = false, initialPr
       {(["topK", "topP", "repetitionPenalty", "frequencyPenalty"] as const).map(number)}
     </section></>}
     <div className="settings-save">
-      {error && <p className="error" role="alert">{error}</p>}
-      {notice && <p className="notice" role="status">{notice}</p>}
+      {error && <AppAlert {...error} />}
+      {notice && <AppAlert tone="success" message={notice} dismiss={() => setNotice("")} />}
       <button className="primary" value="save" disabled={pending}>{pending ? "Saving…" : promptsOnly ? "Save instructions" : "Save settings"}</button>
     </div>
   </form>;

@@ -1,17 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { AppAlert } from "./alerts";
+import { readResponse as read } from "./request";
+import { networkProblem, type Problem } from "../lib/diagnostics";
 import { Eye, EyeOff } from "lucide-react";
 import type { ModelProfile, ModelProfiles } from "../lib/types";
 import { commonThinkingLevels, noThinking, normalizeThinkingLevel, thinkingLabel } from "../lib/thinking";
 import { TokenCount } from "./token-count";
 import { PromptSettings } from "./generation-settings";
-
-async function read<T>(response: Response): Promise<T> {
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Could not complete the model settings request.");
-  return data as T;
-}
 
 function request(data: object, signal?: AbortSignal) {
   return fetch("/api/settings", {
@@ -19,7 +16,7 @@ function request(data: object, signal?: AbortSignal) {
   });
 }
 
-type Feedback = { message: string; error?: boolean };
+type Feedback = Problem & { tone: "error" | "warning" | "success" | "info" };
 type Action = "models" | "test" | "save-profile" | "activate" | "delete-profile";
 type ProfileDraft = { profileId: string; endpoint?: string; model?: string; apiKey?: string; name?: string; promptId?: string;
   thinkingEnabled?: boolean; thinkingLevels?: string };
@@ -72,18 +69,18 @@ export function ModelSettingsForm({ onSaved, initialProfile }: { onSaved: (model
     const controller = new AbortController();
     active.current = controller;
     setBusy(action);
-    setFeedback(action === "test" ? { message: "Waiting for a short reply…" } : null);
+    setFeedback(action === "test" ? { message: "Waiting for a short reply…", tone: "info" } : null);
     try {
       const response = await request({ ...connection, action }, controller.signal);
       if (action === "models") {
         const result = await read<{ models: string[] }>(response);
         if (controller.signal.aborted) return;
         setModels(result.models);
-        if (!result.models.length) setFeedback({ message: "The provider listed no models. You can enter one manually." });
+        if (!result.models.length) setFeedback({ message: "The provider listed no models. You can enter one manually.", tone: "warning" });
       } else if (action === "test") {
         await read<{ ok: true }>(response);
         if (controller.signal.aborted) return;
-        setFeedback({ message: "Connection works. The selected model returned a streamed reply." });
+        setFeedback({ message: "Connection works. The selected model returned a streamed reply.", tone: "success" });
       } else {
         const saved = await read<ModelProfiles & { selectedId?: string }>(response);
         if (controller.signal.aborted) return;
@@ -93,13 +90,13 @@ export function ModelSettingsForm({ onSaved, initialProfile }: { onSaved: (model
         apply(selected);
         onSaved(current.model || null);
         if (action === "delete-profile") { setModels([]); setManual(false); }
-        setFeedback({ message: action === "activate" ? selected.name + " is active for chats."
+        setFeedback({ tone: "success", message: action === "activate" ? selected.name + " is active for chats."
           : action === "delete-profile" ? "Model profile removed." : "Model settings saved." });
       }
     } catch (cause) {
       if (!controller.signal.aborted) {
         if (action === "models") setModels([]);
-        setFeedback({ message: cause instanceof Error ? cause.message : "The request failed.", error: true });
+        setFeedback({ ...networkProblem(cause, "Model settings · " + action), tone: "error" });
       }
     } finally {
       if (!controller.signal.aborted) setBusy(null);
@@ -126,7 +123,7 @@ export function ModelSettingsForm({ onSaved, initialProfile }: { onSaved: (model
       })
       .catch((cause: Error) => {
         if (!controller.signal.aborted) {
-          setFeedback({ message: cause.message, error: true });
+          setFeedback({ ...networkProblem(cause, "Load model profiles"), tone: "error" });
           setBusy(null);
         }
       });
@@ -147,7 +144,7 @@ export function ModelSettingsForm({ onSaved, initialProfile }: { onSaved: (model
   try { newOrigin = Boolean(settings && new URL(settings.endpoint).origin !== new URL(endpoint).origin); } catch {}
   if (!profiles) return busy === "load"
     ? <p className="notice" role="status">Loading model settings…</p>
-    : <><p className="error" role="alert">{feedback?.message}</p><button className="secondary" onClick={() => setReload((value) => value + 1)}>Try again</button></>;
+    : <>{feedback && <AppAlert {...feedback} />}<button className="secondary" onClick={() => setReload((value) => value + 1)}>Try again</button></>;
 
   const selectedPrompt = profiles.prompts.some((prompt) => prompt.id === promptId) ? promptId : "";
   if (editorPrompt !== null) return <div className="profile-prompt-editor">
@@ -167,14 +164,14 @@ export function ModelSettingsForm({ onSaved, initialProfile }: { onSaved: (model
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (thinkingEnabled && !thinkingLevels.length) {
-      setFeedback({ message: "Select at least one thinking level supported by the model.", error: true }); return;
+      setFeedback({ message: "Select at least one thinking level supported by the model.", tone: "warning" }); return;
     }
     if (!saving) void run("save-profile", connection);
   }
   function addThinkingLevel() {
     const level = normalizeThinkingLevel(customLevel);
     if (!/^[a-z0-9_-]{1,32}$/.test(level) || (!thinkingLevels.includes(level) && thinkingLevels.length >= 12)) {
-      setFeedback({ message: "Use letters, numbers, hyphens or underscores. Select up to 12 thinking levels.", error: true }); return;
+      setFeedback({ message: "Use letters, numbers, hyphens or underscores. Select up to 12 thinking levels.", tone: "warning" }); return;
     }
     if (!thinkingLevels.includes(level)) setThinkingLevels([...thinkingLevels, level]);
     setCustomLevel("");
@@ -222,8 +219,8 @@ export function ModelSettingsForm({ onSaved, initialProfile }: { onSaved: (model
           const data = await read<{key: string}>(await request({ action: "reveal-key", profileId, endpoint }, controller.signal));
           if (controller.signal.aborted) return;
           setRevealed(data.key);
-        } catch {
-          if (!controller.signal.aborted) setFeedback({ error: true, message: "Could not show the saved key." });
+        } catch (cause) {
+          if (!controller.signal.aborted) setFeedback({ ...networkProblem(cause, "Reveal model key"), tone: "error", message: "Could not show the saved key." });
           return;
         } finally {
           if (!controller.signal.aborted) setRevealing(false);
@@ -292,6 +289,6 @@ export function ModelSettingsForm({ onSaved, initialProfile }: { onSaved: (model
       {settings && profileId !== "default" && <button type="button" className="quiet danger" disabled={saving}
         onClick={() => { if (window.confirm("Remove " + settings.name + "?")) void run("delete-profile", { profileId }); }}>Remove profile</button>}
     </div>
-    {feedback && <p className={feedback.error ? "error" : "notice"} role={feedback.error ? "alert" : "status"}>{feedback.message}</p>}
+    {feedback && <AppAlert {...feedback} dismiss={() => setFeedback(null)} />}
   </form>;
 }

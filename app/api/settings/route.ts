@@ -1,4 +1,5 @@
 import { workspaceRequest } from "../../../lib/access";
+import { DiagnosticError } from "../../../lib/diagnostics";
 import { failure, field, fields, RequestError } from "../../../lib/http";
 import { effectiveModelKey, modelConnection, modelProfiles, removeModelProfile, saveModelConnection, selectModelProfile } from "../../../lib/store";
 import { generate, listModels } from "../../../lib/provider";
@@ -77,7 +78,8 @@ export async function POST(request: Request) {
       } catch (error) {
         const message = timeout.aborted ? "The model did not reply within 30 seconds. The server may still be loading the model."
           : error instanceof Error && !(error instanceof SyntaxError) ? error.message : "The provider returned an invalid chat stream.";
-        throw new RequestError(message, 502);
+        if (error instanceof DiagnosticError && !timeout.aborted) throw error;
+        throw new RequestError(message, 502, timeout.aborted ? "Model test exceeded the 30-second deadline." : message);
       }
     }
     if (body.action === "save-profile") {

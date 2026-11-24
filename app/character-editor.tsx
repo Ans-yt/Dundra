@@ -5,6 +5,11 @@ import { createPortal } from "react-dom";
 import { ArrowDown, ArrowUp, BookOpen, ImagePlus, Plus, X } from "lucide-react";
 import type { Character } from "../lib/types";
 import { expandNames } from "../lib/chat-text";
+import { AppAlert } from "./alerts";
+import { readResponse } from "./request";
+import { networkProblem } from "../lib/diagnostics";
+import { useHeaderJoin } from "./header-join";
+import type { Problem } from "../lib/diagnostics";
 import { MessageMarkdown } from "./chat-message";
 import { LorebookEditor } from "./lorebooks";
 import { imageTypes, useImageUpload } from "./media";
@@ -85,7 +90,7 @@ function CharacterLorebooks({ owner, selected, change }: {
   const [choice, setChoice] = useState("");
   const [create, setCreate] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const links = selected ?? [];
   const remaining = books.filter(book => !links.includes(book.id));
 
@@ -95,14 +100,13 @@ function CharacterLorebooks({ owner, selected, change }: {
     async function load() {
       try {
         const response = await fetch("/api/lorebooks" + query, { cache: "no-store", signal: controller.signal });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Could not load lorebooks.");
+        const data = await readResponse<{ books: LoreChoice[]; direct: string[] }>(response);
         if (!controller.signal.aborted) {
           setBooks(data.books);
           change(data.direct);
         }
       } catch (cause) {
-        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not load lorebooks.");
+        if (!controller.signal.aborted) setError(networkProblem(cause, "Load character lorebooks"));
       }
     }
     void load();
@@ -117,8 +121,8 @@ function CharacterLorebooks({ owner, selected, change }: {
 
   return <fieldset className="character-lorebooks">
     <legend><BookOpen size={16} /> Lorebooks</legend>
-    {error ? <div className="character-lore-status"><small role="alert">{error}</small>
-      <button className="secondary" type="button" onClick={() => { setError(""); setAttempt(i => i + 1); }}>Retry</button>
+    {error ? <div className="character-lore-status"><AppAlert {...error} />
+      <button className="secondary" type="button" onClick={() => { setError(null); setAttempt(i => i + 1); }}>Retry</button>
     </div> : selected === undefined ? <small role="status">Loading lorebooks…</small> : <>
       {links.length > 0 && <ol className="character-lore-list">{links.map((id, index) => {
         const name = books.find(book => book.id === id)?.name || "Unavailable lorebook";
@@ -152,8 +156,10 @@ function CharacterLorebooks({ owner, selected, change }: {
 }
 
 export function CharacterEditor({ item, player, pending, error, save }: {
-  item?: Character; player: string; pending: boolean; error: string; save: (fields: object) => void;
+  item?: Character; player: string; pending: boolean; error: Problem | null; save: (fields: object) => void;
 }) {
+  const form = useRef<HTMLFormElement>(null);
+  useHeaderJoin(form);
   const [name, setName] = useState(item?.name ?? "");
   const [description, setDescription] = useState(item?.description ?? "");
   const [tags, setTags] = useState(item?.tags ?? "");
@@ -172,7 +178,7 @@ export function CharacterEditor({ item, player, pending, error, save }: {
     save({ ...Object.fromEntries(fields), alternateGreetings: fields.getAll("alternateGreeting"), portrait, lorebookIds });
   }
 
-  return <form className="character-editor" onSubmit={submit}>
+  return <form ref={form} className="character-editor" onSubmit={submit}>
     <aside className="character-preview" aria-label="Character card preview">
       <h2>Card preview</h2>
       <article className="character-card">
@@ -193,7 +199,7 @@ export function CharacterEditor({ item, player, pending, error, save }: {
       <input ref={input} type="file" accept={imageTypes} aria-label="Character portrait" hidden disabled={pending}
         onChange={event => { read(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }} />
       {art && <button className="quiet" type="button" onClick={remove} disabled={pending}>Remove portrait</button>}
-      {uploadError && <small className="character-upload-error" role="alert">{uploadError}</small>}
+      {uploadError && <AppAlert message={uploadError} tone="warning" />}
     </aside>
     <fieldset className="form character-details" disabled={pending}>
       <label>Name<input name="name" required maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label>
@@ -202,7 +208,7 @@ export function CharacterEditor({ item, player, pending, error, save }: {
       <Openings initial={[item?.greeting ?? "", ...(item?.alternateGreetings ?? [])]} character={name} player={player} />
       <label>Tags<input name="tags" maxLength={5000} placeholder="Mystery, Fantasy" value={tags} onChange={event => setTags(event.target.value)} /></label>
       <CharacterLorebooks owner={item?.id} selected={lorebookIds} change={setLorebookIds} />
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <AppAlert {...error} />}
       <button className="primary" disabled={pending || reading}>{pending ? "Saving…" : "Save character"}</button>
     </fieldset>
   </form>;

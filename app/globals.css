@@ -50,6 +50,46 @@ button:disabled { cursor: default; opacity: .58; }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 :where(button, input, textarea, select) { caret-color: var(--accent); }
 .shell { min-height: 100dvh; }
+
+.app-alert {
+  --alert-ink: #ffc5b9;
+  display: flex; align-items: start; min-width: 0; max-width: 100%;
+  border: 1px solid color-mix(in srgb, var(--alert-ink) 35%, var(--line));
+  border-radius: var(--field-radius);
+  background: color-mix(in srgb, var(--alert-ink) 9%, var(--masthead)); color: var(--ink);
+}
+.app-alert[data-tone="warning"] { --alert-ink: #f0ce92; }
+.app-alert[data-tone="success"] { --alert-ink: #a9d7b6; }
+.app-alert[data-tone="info"] { --alert-ink: var(--violet); }
+.app-alert-content {
+  min-width: 0; flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start; gap: 9px; padding: 10px 12px; border-radius: inherit; text-align: start;
+  font-size: .89rem; line-height: 1.45; overflow-wrap: anywhere;
+}
+.app-alert-content:focus-visible { outline-offset: -2px; }
+button.app-alert-content:hover { background: color-mix(in srgb, var(--alert-ink) 8%, transparent); }
+.app-alert-icon { color: var(--alert-ink); margin-top: 2px; }
+.app-alert-details { display: flex; gap: 5px; align-items: center; color: var(--alert-ink); white-space: nowrap; font-size: .79rem; }
+.app-alert .app-alert-dismiss { min-height: 34px; width: 34px; padding: 4px; margin: 3px; color: var(--muted); }
+.app-alert .alert-dialog { width: min(540px, calc(100vw - 24px)); }
+.alert-dialog pre { margin: 0; padding: 16px; font: .85rem/1.5 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-dock > .app-alert, #workspace > .app-alert, .transfer > .app-alert { margin-bottom: 12px; }
+.chat-settings-footer > .app-alert, .preset-dialog-actions > .app-alert { flex-basis: 100%; }
+@media (max-width: 440px) {
+  .app-alert-details { grid-column: 2; }
+}
+
+.masthead::after {
+  content: ""; position: absolute; pointer-events: none; top: calc(100% - 1px);
+  left: calc(var(--join-x, 0px) - 6px); width: calc(var(--join-width, 0px) + 12px);
+  height: var(--join-depth, 0px); opacity: var(--join-strength, 0);
+  background: linear-gradient(to bottom, var(--masthead) calc(100% - 1px), var(--line) calc(100% - 1px));
+  clip-path: polygon(0 0, 100% 0, calc(100% - 7px) 100%, 7px 100%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .masthead::after { transition: opacity 100ms ease-out; }
+}
+
 .masthead { position: sticky; z-index: 2; top: 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 20px; min-height: 62px; padding: 0 max(var(--workspace-gutter), calc((100% - var(--workspace-width)) / 2)); background: var(--masthead); border-bottom: 1px solid var(--line); }
 .brand, .settings-link { display: inline-flex; align-items: center; justify-self: start; gap: 9px; min-height: 42px; }
 .brand { font: 700 28px/1 Georgia, serif; letter-spacing: -.03em; }
@@ -153,7 +193,7 @@ details[open] > summary .disclosure-arrow { transform: rotate(90deg); }
 .local-image-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 textarea { resize: vertical; }
 .notice, .error { background: var(--panel); border: 1px solid var(--line); padding: 13px 15px; border-radius: 7px; margin-bottom: 17px; max-width: 72ch; overflow-wrap: anywhere; }
-.error { color: #ffd9d0; background: #49302e; border-color: #9b6a61; }
+.error { color: var(--ink); background: color-mix(in srgb, #ffc5b9 9%, var(--masthead)); border-color: color-mix(in srgb, #ffc5b9 35%, var(--line)); }
 .chat-workspace {
   --chat-measure: 720px;
   --chat-drawer-width: 440px;
@@ -493,7 +533,6 @@ textarea { resize: vertical; }
 }
 .character-portrait:is(:hover, [data-dragging="true"]) > span:not(.cover) { border-color: var(--violet); color: var(--violet); }
 .character-portrait:focus-visible { outline-offset: -3px; z-index: 1; }
-.character-upload-error { color: #ffd9d0; overflow-wrap: anywhere; }
 
 .opening-editor, .character-lorebooks { min-width: 0; display: grid; gap: 10px; }
 .opening-editor legend, .character-lorebooks legend { padding: 0; margin-bottom: 8px; font-weight: 650; }

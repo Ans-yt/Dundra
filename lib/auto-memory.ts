@@ -33,4 +33,4 @@ export const defaultAutoMemory: AutoMemory = {
   ],
 };
 
-export type MemoryStatus = { summary: string; bookId: string | null; running: boolean; error: string };
+export type MemoryStatus = { summary: string; bookId: string | null; running: boolean; error: string; details?: string };

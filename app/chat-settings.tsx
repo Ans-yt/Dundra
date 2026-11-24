@@ -1,5 +1,7 @@
 "use client";
 
+import { AppAlert } from "./alerts";
+import type { Problem } from "../lib/diagnostics";
 import { useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react";
 import { ArrowLeft, BookOpen, Check, ChevronDown, Grip, Palette, Plus, Settings2, SlidersHorizontal, Wrench, X } from "lucide-react";
 import { chatColors, chatFonts, chatMemoryLimit, customThinkingTag, customThinkingTagLimit, defaultChatText, generationControls, thinkingFormats, type ChatOptions, type ChatViewOptions } from "../lib/chat-options";
@@ -39,7 +41,7 @@ function profileHost(endpoint: string) {
 }
 
 export function ChatSettings({ preferences, advanced, chatId, locked, error, onClose, onModelsChanged, onSave, onSummarize, onPreview, width, onWidth }: {
-  preferences: ChatPreferences; advanced: Advanced; chatId: string; locked: boolean; error: string; onClose: () => void;
+  preferences: ChatPreferences; advanced: Advanced; chatId: string; locked: boolean; error: Problem | null; onClose: () => void;
   width: number; onWidth: (width: number) => void;
   onModelsChanged: (model: string | null) => Promise<boolean>;
   onSummarize: () => Promise<boolean>;
@@ -344,7 +346,7 @@ export function ChatSettings({ preferences, advanced, chatId, locked, error, onC
     </>}
     </form>}
     {!(advanced.enabled && tools) && (!editingProfile || error) && <div className="chat-settings-footer">
-      {error && <p className="chat-settings-error error" role="alert">{error}</p>}
+      {error && <AppAlert className="chat-settings-error" {...error} />}
       {saved && <p role="status">Saved.</p>}
       {!editingProfile && <button type="submit" form="chat-settings-form" className="primary" disabled={locked}>Save {tab === "Memory" ? "memory" : tab === "Customize" ? "customization" : tab === "Bonus" ? "bonus settings" : "settings"}</button>}
     </div>}

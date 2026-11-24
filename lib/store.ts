@@ -14,6 +14,7 @@ import type { StoredImage } from "./media";
 
 import type { Character, Chat, ChatPreferences, Conversation, Message, ModelProfile, ModelProfiles, ModelThinking, Persona } from "./types";
 import { RequestError } from "./http";
+import type { Problem } from "./diagnostics";
 import type { MemoryStatus } from "./auto-memory";
 import { noThinking } from "./thinking";
 
@@ -999,8 +1000,16 @@ function invalidateMemoriesFrom(db: DatabaseSync, chatId: string, message: numbe
 
 export function memoryStatus(chatId: string): MemoryStatus {
   const row = database().prepare("SELECT summary, book_id, expires, error FROM chat_memory WHERE chat_id = ?").get(chatId);
+  const raw = String(row?.error ?? "");
+  let failure: Problem = { message: raw };
+  if (raw.startsWith("{")) {
+    try {
+      const saved = JSON.parse(raw);
+      if (typeof saved.message === "string" && typeof saved.details === "string") failure = saved;
+    } catch { /* Older workspaces store the error as plain text. */ }
+  }
   return { summary: String(row?.summary ?? ""), bookId: row?.book_id ? String(row.book_id) : null,
-    running: Number(row?.expires ?? 0) > Date.now(), error: String(row?.error ?? "") };
+    running: Number(row?.expires ?? 0) > Date.now(), error: failure.message, details: failure.details };
 }
 
 export function beginMemorySummary(chatId: string, manual = false) {
@@ -1027,11 +1036,11 @@ export function beginMemorySummary(chatId: string, manual = false) {
 }
 
 export function finishMemorySummary(chatId: string, job: NonNullable<ReturnType<typeof beginMemorySummary>>,
-  result?: { summary: string; entry?: LoreEntry }, error = "") {
+  result?: { summary: string; entry?: LoreEntry }, error?: Problem) {
   transaction(db => {
     const state = db.prepare("SELECT * FROM chat_memory WHERE chat_id = ? AND run = ?").get(chatId, job.lease);
     if (!state) return;
-    db.prepare("UPDATE chat_memory SET run='', expires=0, error=? WHERE chat_id = ?").run(error, chatId);
+    db.prepare("UPDATE chat_memory SET run='', expires=0, error=? WHERE chat_id = ?").run(error ? JSON.stringify(error) : "", chatId);
     if (!result) return;
     const source = db.prepare("SELECT id, content FROM messages WHERE chat_id = ? AND id > ? AND id <= ? ORDER BY id")
       .all(chatId, job.covered, job.head);

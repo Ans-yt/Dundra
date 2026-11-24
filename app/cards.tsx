@@ -1,5 +1,8 @@
 "use client";
 
+import { AppAlert } from "./alerts";
+import { readResponse } from "./request";
+import { networkProblem, type Problem } from "../lib/diagnostics";
 import { chatImportBody } from "./chat-transfer";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -7,12 +10,6 @@ import { Download, Link2, LoaderCircle, Upload } from "lucide-react";
 import type { Library } from "../lib/types";
 
 type Preview = { token: string; name: string; creator?: string; tags: string[]; openings: number };
-
-async function read<T>(response: Response): Promise<T> {
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || "The card request failed.");
-  return payload as T;
-}
 
 function json(data: object) {
   return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) };
@@ -23,7 +20,7 @@ export function CardsView({ library, onImport }: { library: Library; onImport: (
   const [tags, setTags] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const [message, setMessage] = useState("");
   const [version, setVersion] = useState("2");
   const [chatId, setChatId] = useState("");
@@ -40,14 +37,14 @@ export function CardsView({ library, onImport }: { library: Library; onImport: (
   async function inspect(action: string, request: RequestInit, label: string) {
     if (status) return;
     setStatus(label);
-    setError("");
+    setError(null);
     setMessage("");
     try {
-      const draft = await read<Preview>(await fetch("/api/cards?action=" + action, request));
+      const draft = await readResponse<Preview>(await fetch("/api/cards?action=" + action, request));
       setTags(draft.tags);
       setPreview(draft);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not open the card.");
+      setError(networkProblem(cause, "Open character card"));
     } finally { setStatus(""); }
   }
 
@@ -55,11 +52,11 @@ export function CardsView({ library, onImport }: { library: Library; onImport: (
     if (!file) return;
     setDragging(false);
     if (!/\.(png|json)$/i.test(file.name)) {
-      setError("Choose a PNG character card or a JSON file.");
+      setError({ message: "Choose a PNG character card or a JSON file." });
       return;
     }
     if (file.size > 12 * 1024 * 1024) {
-      setError("Choose a file up to 12 MiB.");
+      setError({ message: "Choose a file up to 12 MiB." });
       return;
     }
     void inspect("preview-file", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file }, "Reading character card…");
@@ -73,22 +70,22 @@ export function CardsView({ library, onImport }: { library: Library; onImport: (
   async function commit(picked: string[]) {
     if (!preview || status) return;
     setStatus("Saving character…");
-    setError("");
+    setError(null);
     try {
-      const result = await read<Library>(await fetch("/api/cards?action=import", json({ token: preview.token, tags: picked })));
+      const result = await readResponse<Library>(await fetch("/api/cards?action=import", json({ token: preview.token, tags: picked })));
       onImport(result);
       setMessage("Imported " + preview.name + " into your library.");
       setPreview(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the character.");
+      setError(networkProblem(cause, "Import character card"));
     } finally { setStatus(""); }
   }
 
   return <section className="section transfer">
     <header className="section-head"><h1>Import &amp; export</h1></header>
     {status && !preview && <div className="notice transfer-status" role="status"><LoaderCircle size={18} />{status}</div>}
-    {error && !preview && <p className="error" role="alert">{error}</p>}
-    {message && <p className="notice" role="status">{message}</p>}
+    {error && !preview && <AppAlert {...error} dismiss={() => setError(null)} />}
+    {message && <AppAlert tone="success" message={message} dismiss={() => setMessage("")} />}
     <div className="transfer-grid">
       <section className="transfer-panel">
         <h2>Import a character</h2>
@@ -131,12 +128,12 @@ export function CardsView({ library, onImport }: { library: Library; onImport: (
               <input type="file" aria-label="Choose SillyTavern chat file" accept=".jsonl,application/x-ndjson" disabled={!!status} onChange={async event => {
               const file = event.target.files?.[0]; event.target.value = "";
               if (!file) return;
-              setError(""); setMessage(""); setStatus("Importing chat…");
+              setError(null); setMessage(""); setStatus("Importing chat…");
               try {
                 const body = await chatImportBody(file, chatCharacter || library.characters[0].id);
-                const result = await read<Library>(await fetch("/api/library?format=jsonl", json(body)));
+                const result = await readResponse<Library>(await fetch("/api/library?format=jsonl", json(body)));
                 onImport(result); setMessage("Chat imported. Open it from My Chats.");
-              } catch (cause) { setError((cause as Error).message); }
+              } catch (cause) { setError(networkProblem(cause, "Import chat")); }
               finally { setStatus(""); }
             }} /></label></>}
           {library.chats.length > 0 && <><label>Export conversation<select value={chatId || library.chats[0].id} onChange={event => setChatId(event.target.value)}>{library.chats.map(chat => <option key={chat.id} value={chat.id}>{chat.title} · {chat.character} · {new Date(chat.updated).toLocaleDateString()}</option>)}</select></label>
@@ -155,12 +152,12 @@ export function CardsView({ library, onImport }: { library: Library; onImport: (
             <button type="button" key={tag} className="pick-tag" aria-pressed={tags.includes(tag)} disabled={!!status}
               onClick={() => setTags((values) => values.includes(tag) ? values.filter((value) => value !== tag) : [...values, tag])}>{tag}</button>)}</div>
         </> : <p>This card has no tags.</p>}
-        {error && <p className="error" role="alert">{error}</p>}
+        {error && <AppAlert {...error} />}
         {status && <div className="transfer-status" role="status"><LoaderCircle size={18} />{status}</div>}
         <div className="transfer-actions">
           <button className="primary" disabled={!!status || (!!preview.tags.length && !tags.length)} onClick={() => void commit(tags)}>{preview.tags.length ? "Import selected tags" : "Import character"}</button>
           {preview.tags.length > 0 && <button className="secondary" disabled={!!status} onClick={() => void commit([])}>Import without tags</button>}
-          <button className="quiet" disabled={!!status} onClick={() => { setPreview(null); setError(""); }}>Cancel</button>
+          <button className="quiet" disabled={!!status} onClick={() => { setPreview(null); setError(null); }}>Cancel</button>
         </div>
       </>}
     </dialog>

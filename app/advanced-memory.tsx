@@ -1,5 +1,7 @@
 "use client";
 
+import { AppAlert } from "./alerts";
+import type { Problem } from "../lib/diagnostics";
 import { useState, type FormEvent } from "react";
 import { BookOpen, Plus, RefreshCw } from "lucide-react";
 import { memoryLimits, memoryPromptLimit, type AutoMemory } from "../lib/auto-memory";
@@ -15,7 +17,7 @@ const tokenFields = [
 ] as const;
 
 export function AdvancedMemory({ preferences, locked, error, close, save, summarize, openBook }: {
-  preferences: ChatPreferences; locked: boolean; error: string; close: () => void;
+  preferences: ChatPreferences; locked: boolean; error: Problem | null; close: () => void;
   save: (value: AutoMemory) => Promise<boolean>; summarize: () => Promise<boolean>; openBook: (id: string) => void;
 }) {
   const [draft, setDraft] = useState(preferences.options.autoMemory);
@@ -49,7 +51,7 @@ export function AdvancedMemory({ preferences, locked, error, close, save, summar
           {(status.running || changed || (!status.summary && !status.error)) && <small className="memory-status" role="status">
             {status.running ? "Writing a summary…" : changed ? "Save your changes before summarizing." : "No summary yet."}
           </small>}
-          {!status.running && status.error && <p className="error" role="alert">{status.error}</p>}
+          {!status.running && status.error && <AppAlert message={status.error} details={status.details} />}
           {!status.running && status.summary && preferences.options.autoMemory.book && !status.bookId && <small className="memory-status">
             No lorebook memories yet. The summary model adds one when it finds a new event with searchable keywords.
           </small>}
@@ -105,7 +107,7 @@ export function AdvancedMemory({ preferences, locked, error, close, save, summar
         </section>
       </div>
       <footer className="preset-dialog-actions">
-        {(saveError || error) && <p className="error" role="alert">{saveError || error}</p>}
+        {saveError ? <AppAlert tone="warning" message={saveError} /> : error && <AppAlert {...error} />}
         <button type="button" className="quiet" onClick={close}>Cancel</button>
         <button className="primary" disabled={locked}>Save automatic memory</button>
       </footer>

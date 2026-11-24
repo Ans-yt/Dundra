@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowLeft, Plus } from "lucide-react";
+import { AppAlert } from "./alerts";
+import { readResponse as read } from "./request";
+import { DiagnosticError, networkProblem, type Problem } from "../lib/diagnostics";
 import { NavigationIcon } from "./navigation-icon";
 import { WorkspaceGate } from "./onboarding";
 import type { Character, Chat, ChatPreferences, ChatSession, Library, Persona } from "../lib/types";
@@ -28,19 +31,12 @@ type Tab = (typeof navigation)[number]["title"] | "Settings";
 type Editor = { kind: "character"; item?: Character } | { kind: "persona"; item?: Persona };
 const empty: Library = { characters: [], personas: [], chats: [], model: null, defaultPersonaId: null };
 
-async function read<T>(response: Response): Promise<T> {
-  if (response.status === 401) window.dispatchEvent(new Event("dundra:check-access"));
-  const json = await response.json();
-  if (!response.ok) throw new Error(json.error || "The request failed.");
-  return json as T;
-}
-
 const post = (url: string, data: object, signal?: AbortSignal) => fetch(url, {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data), signal,
 });
 
 function Notice({ children }: { children: ReactNode }) {
-  return <p className="notice" role="status">{children}</p>;
+  return typeof children === "string" ? <AppAlert tone="info" message={children} /> : <p className="notice" role="status">{children}</p>;
 }
 
 function CardTokens({ item }: { item: Character }) {
@@ -74,7 +70,7 @@ function Workspace() {
   const [preview, setPreview] = useState<ReplyPreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Problem | null>(null);
   const abort = useRef<AbortController | null>(null);
 
   async function refresh() {
@@ -82,7 +78,7 @@ function Workspace() {
   }
 
   useEffect(() => {
-    refresh().catch((e: Error) => setError(e.message)).finally(() => setLoading(false));
+    refresh().catch((e: Error) => setError(networkProblem(e, "Open workspace"))).finally(() => setLoading(false));
     return () => abort.current?.abort();
   }, []);
 
@@ -100,7 +96,7 @@ function Workspace() {
         .then(read<ChatSession>).then(result => {
           if (!controller.signal.aborted) setOpenChat(current => current?.chat.id === result.chat.id && current.revision <= result.revision ? result : current);
         }).catch(cause => {
-          if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not reload the chat formatting.");
+          if (!controller.signal.aborted) setError(networkProblem(cause, "Reload chat formatting"));
         });
     }
     window.addEventListener("advanced-change", refreshFormatting);
@@ -140,13 +136,13 @@ function Workspace() {
     setSearch("");
     setFilter("");
     setDraft("");
-    setError("");
+    setError(null);
   }
 
   async function action(work: () => Promise<void>) {
-    setError("");
+    setError(null);
     setPending(true);
-    try { await work(); return true; } catch (e) { setError(e instanceof Error ? e.message : "Something went wrong."); return false; }
+    try { await work(); return true; } catch (e) { setError(networkProblem(e, "Dundra request")); return false; }
     finally { setPending(false); }
   }
 
@@ -214,7 +210,7 @@ function Workspace() {
     abort.current = controller;
     if (mode === "send") setDraft("");
     setPreview({ ...initialPreview, text: "", reasoning: "" });
-    setError("");
+    setError(null);
     let saved = false;
     let frame: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -257,7 +253,7 @@ function Workspace() {
           buffer = lines.pop() ?? "";
           for (const line of lines) {
             const event = JSON.parse(line);
-            if (event.error) throw new Error(event.error);
+            if (event.error) throw new DiagnosticError(event.error, event.details || event.error);
             if (event.done) {
               saved = true;
               if (mode === "impersonate" && typeof event.draft === "string") setDraft(event.draft);
@@ -284,12 +280,12 @@ function Workspace() {
       if (mode !== "impersonate") await loadChat(id);
       return true;
     } catch (e) {
-      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "Reply failed.");
+      if (!controller.signal.aborted) setError(networkProblem(e, "Model reply"));
     } finally {
       clearTimeout(frame);
       if (mode === "send" && !saved) setDraft(submitted);
       if (controller.signal.aborted) {
-        try { await loadChat(id); } catch { setError("Could not reload the conversation."); }
+        try { await loadChat(id); } catch (cause) { setError(networkProblem(cause, "Reload conversation")); }
       }
       abort.current = null;
       setPreview(null);
@@ -311,7 +307,7 @@ function Workspace() {
         applySession(saved);
       });
     }
-    return <ChatWorkspace key={chat.id} session={openChat} advanced={advanced} personas={data.personas} draft={draft} preview={preview} locked={locked} error={error}
+    return <ChatWorkspace key={chat.id} session={openChat} advanced={advanced} personas={data.personas} draft={draft} preview={preview} locked={locked} error={error} onDismissError={() => setError(null)}
       onBack={() => visit("Chats")}
       onImport={file => void action(async () => {
         const body = await chatImportBody(file, chat.character_id);
@@ -372,10 +368,10 @@ function Workspace() {
     </header>
     <main id="workspace">
       {loading && <Notice>Opening your workspace…</Notice>}
-      {error && editor?.kind !== "character" && <div className="error" role="alert">{error}</div>}
+      {error && editor?.kind !== "character" && !selected && <AppAlert {...error} dismiss={() => setError(null)} />}
 
       {!loading && editor && <Section title={editor.item ? "Edit " + editor.kind : "New " + editor.kind}
-        action={<button className="secondary" disabled={pending} onClick={() => { setError(""); setEditor(null); }}><ArrowLeft size={16} /> Back</button>}>
+        action={<button className="secondary" disabled={pending} onClick={() => { setError(null); setEditor(null); }}><ArrowLeft size={16} /> Back</button>}>
         {editor.kind === "character" ? <CharacterEditor key={editor.item?.id ?? "new"} item={editor.item}
           player={data.personas.find(persona => persona.id === (editor.item?.defaultPersonaId ?? data.defaultPersonaId))?.name ?? "You"}
           pending={pending} error={error} save={saveEditor} /> : <form className="form" onSubmit={save}>
@@ -392,7 +388,7 @@ function Workspace() {
 
       {!loading && !editor && selected && <PresetDialog compact title={"New chat with " + selected.name} close={() => { if (!pending) setSelected(null); }}>
         <form className="form new-chat-form" onSubmit={start}>
-          {error && <p className="error" role="alert">{error}</p>}
+          {error && <AppAlert {...error} dismiss={() => setError(null)} />}
           <label>Play as<select name="persona" defaultValue={selected.defaultPersonaId ?? data.defaultPersonaId ?? ""}><option value="">No persona</option>{data.personas.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           {data.personas.length > 0 && <label className="remember-persona"><input type="checkbox" name="rememberPersona" />Use this choice by default for {selected.name}</label>}
           <button className="primary" disabled={pending}>Start chat</button>

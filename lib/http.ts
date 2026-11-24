@@ -1,5 +1,7 @@
+import { DiagnosticError, diagnosticText } from "./diagnostics";
+
 export class RequestError extends Error {
-  constructor(message: string, readonly status = 400) {
+  constructor(message: string, readonly status = 400, readonly details?: string) {
     super(message);
   }
 }
@@ -36,9 +38,25 @@ export function localRequest(request: Request) {
   }
 }
 
+export function errorDiagnostic(error: unknown, context: string) {
+  const reference = crypto.randomUUID().slice(0, 8);
+  const root = error instanceof Error ? error : undefined;
+  const details = root instanceof DiagnosticError || root instanceof RequestError ? root.details : undefined;
+  const name = root ? diagnosticText(root.name) : "Error";
+  const message = details ?? (root instanceof RequestError ? root.message : name + ". See the terminal for the full server error.");
+  const report = context + " · " + reference + "\n" + diagnosticText(message);
+  console.error(report);
+  if (root && !details && !(root instanceof RequestError)) console.error(root);
+  return report;
+}
+
 export function failure(error: unknown) {
-  if (error instanceof RequestError) return Response.json({ error: error.message }, { status: error.status });
+  if (error instanceof RequestError && !error.details && error.status < 500) {
+    return Response.json({ error: error.message }, { status: error.status });
+  }
   if (error instanceof SyntaxError) return Response.json({ error: "Invalid JSON request." }, { status: 400 });
-  console.error(error);
-  return Response.json({ error: "Dundra could not complete this request." }, { status: 500 });
+  const details = errorDiagnostic(error, "Dundra API");
+  const status = error instanceof RequestError ? error.status : error instanceof DiagnosticError ? 502 : 500;
+  return Response.json({ error: error instanceof RequestError || error instanceof DiagnosticError
+    ? error.message : "Dundra could not complete this request.", details }, { status });
 }

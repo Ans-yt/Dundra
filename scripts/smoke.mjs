@@ -11,6 +11,7 @@ let mode = 'normal';
 let prompt;
 let memoryPrompt;
 let rejectSummary = false;
+const fakeCredential = 'local-fixture-credential';
 const provider = createServer(async (req, res) => {
   assert.equal(req.url, '/v1/chat/completions');
   let body = '';
@@ -31,6 +32,16 @@ const provider = createServer(async (req, res) => {
     return;
   }
   prompt = payload;
+  if (mode === 'http-error') {
+    res.writeHead(429, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: { code: 'capacity', message: 'Temporary capacity limit for ' + fakeCredential } }));
+    return;
+  }
+  if (mode === 'stream-error') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end('data: ' + JSON.stringify({ error: { code: 'overloaded', message: 'Worker unavailable. Authorization: Bearer ' + fakeCredential } }) + '\n\n');
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
   res.write('data: {"choices":[{"delta":{"content":"Signal "}}]}\n\n');
   setTimeout(() => {
@@ -49,7 +60,7 @@ let app;
 async function start(directory = data) {
   app = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', String(port)], {
     windowsHide: true, stdio: 'inherit',
-    env: { ...process.env, DUNDRA_DATA_DIR: directory, DUNDRA_MODEL_KEY: '', DUNDRA_MODEL: 'test-model', DUNDRA_MODEL_URL: 'http://127.0.0.1:' + provider.address().port + '/v1' },
+    env: { ...process.env, DUNDRA_DATA_DIR: directory, DUNDRA_MODEL_KEY: fakeCredential, DUNDRA_MODEL: 'test-model', DUNDRA_MODEL_URL: 'http://127.0.0.1:' + provider.address().port + '/v1' },
   });
   for (let count = 0; count < 100; count++) {
     try { if ((await fetch(base)).ok) return; } catch {}
@@ -117,6 +128,22 @@ try {
   assert.deepEqual(saved.map(x => x.content), ['Welcome, Quinn.', 'Hello?', 'Signal received.']);
   mode = 'fail';
   assert.match(await (await post('/api/reply', { chat, regenerate: true })).text(), /"error"/);
+  assert.deepEqual((await get(url)).messages, saved);
+  mode = 'http-error';
+  const denial = await (await post('/api/reply', { chat, message: 'Retry safely' })).text();
+  assert.match(denial, /rate-limiting/);
+  assert.match(denial, /Model reply · [a-f0-9]{8}.*HTTP 429.*Temporary capacity limit for \[redacted\]/);
+  assert.ok(!denial.includes(fakeCredential));
+  const tested = await post('/api/settings', { action: 'test', endpoint: 'http://127.0.0.1:' + provider.address().port + '/v1',
+    model: 'test-model', apiKey: fakeCredential });
+  assert.equal(tested.status, 502);
+  const testFailure = await tested.json();
+  assert.match(testFailure.details, /Dundra API · [a-f0-9]{8}[\s\S]*capacity/);
+  assert.ok(!JSON.stringify(testFailure).includes(fakeCredential));
+  mode = 'stream-error';
+  const interrupted = await (await post('/api/reply', { chat, message: 'Retry safely' })).text();
+  assert.match(interrupted, /overloaded.*Worker unavailable/);
+  assert.ok(!interrupted.includes(fakeCredential));
   assert.deepEqual((await get(url)).messages, saved);
   mode = 'normal';
   assert.match(await (await post('/api/reply', { chat, regenerate: true })).text(), /"done":true/);
@@ -211,6 +238,7 @@ try {
   await say('I open the silver box.');
   const throttled = await waitForMemory();
   assert.match(throttled.error, /rate-limiting/);
+  assert.match(throttled.details, /Memory summary · [a-f0-9]{8}[\s\S]*HTTP 429/);
   assert.equal(throttled.summary, manual.summary);
   assert.equal(throttled.bookId, null);
   rejectSummary = false;
