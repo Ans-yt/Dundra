@@ -1,4 +1,5 @@
-import { fields, field, localRequest, failure, RequestError } from "../../../lib/http";
+import { workspaceRequest } from "../../../lib/access";
+import { fields, field, failure, RequestError } from "../../../lib/http";
 import { readLorebook, type LoreScope } from "../../../lib/lorebook";
 import { chatLorebookLinks, deleteLorebook, lorebook, lorebookList, loreLinks, saveLorebook, setLoreLink } from "../../../lib/store";
 
@@ -12,7 +13,7 @@ function scope(value: unknown): LoreScope {
 
 export function GET(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     const query = new URL(request.url).searchParams;
     const id = query.get("book");
     if (id) {
@@ -33,7 +34,7 @@ export function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     const body = await fields(request, 3_000_000);
     const id = field(body, "id", 64);
     switch (body.action) {

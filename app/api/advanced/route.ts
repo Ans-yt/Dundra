@@ -1,14 +1,15 @@
+import { workspaceRequest } from "../../../lib/access";
 import { advancedConfig, saveAdvanced } from "../../../lib/store";
 import { importRules, importPreset } from "../../../lib/tavern";
 import { applyRules } from "../../../lib/regex-server";
-import { localRequest, fields, failure, RequestError } from "../../../lib/http";
+import { fields, failure, RequestError } from "../../../lib/http";
 export const dynamic = "force-dynamic";
 export async function GET(req:Request) {
-  try { localRequest(req); return Response.json(advancedConfig(), {headers:{"Cache-Control":"no-store"}}); } catch(e) {return failure(e);}
+  try { workspaceRequest(req); return Response.json(advancedConfig(), {headers:{"Cache-Control":"no-store"}}); } catch(e) {return failure(e);}
 }
 export async function POST(req:Request) {
   try {
-    localRequest(req);
+    workspaceRequest(req);
     const cfg = await fields(req, 3000000);
     const current = advancedConfig();
     try {

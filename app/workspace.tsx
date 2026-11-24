@@ -155,9 +155,10 @@ function InlinePersona({ item, disabled, save }: { item: Persona; disabled: bool
   </details>;
 }
 
-export function PersonasView({ all, search, setSearch, create, save, disabled }: {
+export function PersonasView({ all, search, setSearch, create, save, disabled, defaultId, setDefault }: {
   all: Persona[]; search: string; setSearch: (value: string) => void; create: () => void;
   save: Parameters<typeof InlinePersona>[0]["save"]; disabled: boolean;
+  defaultId: string | null; setDefault: (id: string) => void;
 }) {
   const [sort, setSort] = useState("name");
   const query = search.trim().toLowerCase();
@@ -168,6 +169,12 @@ export function PersonasView({ all, search, setSearch, create, save, disabled }:
     <header className="manager-head"><div><h2>Your personas</h2><p>{plural(items.length, "persona")}</p></div>
       <button className="primary" onClick={create}><Plus size={17} /> New persona</button>
     </header>
+    {all.length > 0 && <label className="persona-default">Default persona
+      <select value={defaultId ?? ""} disabled={disabled} onChange={event => setDefault(event.target.value)}>
+        <option value="">No default persona</option>
+        {all.map(persona => <option key={persona.id} value={persona.id}>{persona.name}</option>)}
+      </select>
+    </label>}
     <div className="persona-list">{items.map(item => <InlinePersona key={item.id} item={item} disabled={disabled} save={save} />)}</div>
     {!items.length && <p className="notice" role="status">{query ? "No personas match this search." : "Create a persona to give your character someone to meet."}</p>}
   </Manager>;

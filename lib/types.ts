@@ -31,7 +31,7 @@ export type Chat = {
 };
 type MessagePlayer = { id: string | null; name: string; portrait: string | null };
 export type Message = { media?: string; displayContent?: string; id: number; role: "user" | "assistant"; content: string; reasoning?: string; thinkingMs?: number; opening?: boolean; edited?: boolean; variant?: number; variantCount?: number; player?: MessagePlayer };
-export type Library = { characters: Character[]; personas: Persona[]; chats: Chat[]; model: string | null };
+export type Library = { characters: Character[]; personas: Persona[]; chats: Chat[]; model: string | null; defaultPersonaId: string | null };
 export type Conversation = { chat: Chat; messages: Message[]; revision: number };
 type ModelSettings = { endpoint: string; model: string; hasKey: boolean };
 export type ModelThinking = { enabled: boolean; levels: string[] };

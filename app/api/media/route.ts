@@ -1,4 +1,5 @@
-import { failure, localRequest, RequestError } from "../../../lib/http";
+import { workspaceRequest } from "../../../lib/access";
+import { failure, RequestError } from "../../../lib/http";
 import { storedImage } from "../../../lib/store";
 
 export const runtime = "nodejs";
@@ -6,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export function GET(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     const params = new URL(request.url).searchParams;
     const kind = params.get("kind");
     const id = params.get("id");

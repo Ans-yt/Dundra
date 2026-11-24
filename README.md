@@ -16,7 +16,7 @@ npm run build
 npm start
 ```
 
-Open [Dundra](http://127.0.0.1:3000/). Dundra runs on your own machine and is intended for one local user.
+Open [Dundra](http://127.0.0.1:3000/). Dundra runs on your own machine and is intended for one local user. The first-run walkthrough helps you choose a default persona. You can also set a local account password to protect access in the browser, or skip that step. Change your default persona later under **Personas**.
 
 On Windows, double-click **Start.cmd** to launch the installed copy, or **Update & Start.cmd** to pull updates from the configured Git upstream first. The updater skips Git if the folder came from a ZIP, the branch has no upstream, or you have local changes.
 

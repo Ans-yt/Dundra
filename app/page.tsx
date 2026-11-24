@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowLeft, Plus } from "lucide-react";
+import { ArrowLeft, LockKeyhole, Plus } from "lucide-react";
 import { NavigationIcon } from "./navigation-icon";
+import { WorkspaceGate } from "./onboarding";
 import type { Character, Chat, ChatPreferences, ChatSession, Library, Persona } from "../lib/types";
 import { ChatsView, ContinueShelf, Mark, PersonasView, SearchField } from "./workspace";
 import { AlternateOpenings, CardsView } from "./cards";
@@ -25,9 +26,10 @@ const navigation = [
 ] as const;
 type Tab = (typeof navigation)[number]["title"] | "Settings";
 type Editor = { kind: "character"; item?: Character } | { kind: "persona"; item?: Persona };
-const empty: Library = { characters: [], personas: [], chats: [], model: null };
+const empty: Library = { characters: [], personas: [], chats: [], model: null, defaultPersonaId: null };
 
 async function read<T>(response: Response): Promise<T> {
+  if (response.status === 401) window.dispatchEvent(new Event("dundra:check-access"));
   const json = await response.json();
   if (!response.ok) throw new Error(json.error || "The request failed.");
   return json as T;
@@ -56,6 +58,13 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
 
 export default function Home() {
   useVisualPreferences();
+  return <WorkspaceGate>{(accountName, lock, locking, accessError) =>
+    <Workspace accountName={accountName} lock={lock} locking={locking} accessError={accessError} />}</WorkspaceGate>;
+}
+
+function Workspace({ accountName, lock, locking, accessError }: {
+  accountName: string | null; lock: () => Promise<void>; locking: boolean; accessError: string;
+}) {
   const [data, setData] = useState(empty);
   const [tab, setTab] = useState<Tab>("Library");
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -360,12 +369,16 @@ export default function Home() {
           aria-label={title} disabled={locked} onClick={() => visit(title)}><NavigationIcon name={icon} /><span className={title === "Import & export" ? "nav-long" : undefined}>{title}</span>
               {title === "Import & export" && <span className="nav-short">Transfer</span>}</button>)}
       </nav>
-      <button className="settings-link" aria-current={tab === "Settings" ? "page" : undefined}
-        aria-label="Settings" disabled={locked} onClick={() => visit("Settings")}><NavigationIcon name="settings" /><span>Settings</span></button>
+      <div className="masthead-actions">
+        <button className="settings-link" aria-current={tab === "Settings" ? "page" : undefined}
+          aria-label="Settings" disabled={locked} onClick={() => visit("Settings")}><NavigationIcon name="settings" /><span>Settings</span></button>
+        {accountName && <button type="button" className="quiet" aria-label="Lock Dundra" title={"Lock Dundra · " + accountName}
+          disabled={locked || locking} onClick={() => void lock()}><LockKeyhole size={17} aria-hidden="true" /></button>}
+      </div>
     </header>
     <main id="workspace">
       {loading && <Notice>Opening your workspace…</Notice>}
-      {error && <div className="error" role="alert">{error}</div>}
+      {(error || accessError) && <div className="error" role="alert">{error || accessError}</div>}
 
       {!loading && editor && <Section title={editor.item ? "Edit " + editor.kind : "New " + editor.kind}
         action={<button className="secondary" disabled={pending} onClick={() => setEditor(null)}><ArrowLeft size={16} /> Back</button>}>
@@ -391,7 +404,7 @@ export default function Home() {
       {!loading && !editor && selected && <PresetDialog compact title={"New chat with " + selected.name} close={() => { if (!pending) setSelected(null); }}>
         <form className="form new-chat-form" onSubmit={start}>
           {error && <p className="error" role="alert">{error}</p>}
-          <label>Play as<select name="persona" defaultValue={selected.defaultPersonaId || ""}><option value="">No persona</option>{data.personas.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <label>Play as<select name="persona" defaultValue={selected.defaultPersonaId ?? data.defaultPersonaId ?? ""}><option value="">No persona</option>{data.personas.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           {data.personas.length > 0 && <label className="remember-persona"><input type="checkbox" name="rememberPersona" />Use this choice by default for {selected.name}</label>}
           <button className="primary" disabled={pending}>Start chat</button>
         </form>
@@ -428,7 +441,9 @@ export default function Home() {
           </div>
           </article>;
         })}</div>
-        {!characters.length && <Notice>No characters match this search.</Notice>}
+        {!characters.length && <Notice>{data.characters.length
+          ? "No characters match this search."
+          : "Create a character or bring one in through Import & export."}</Notice>}
       </section>}
 
       {!loading && tab === "Import & export" && <CardsView library={data} onImport={setData} />}
@@ -437,6 +452,9 @@ export default function Home() {
         characters={data.characters} search={search} setSearch={setSearch} open={resumeChat} start={chooseCharacter} remove={removeChat} disabled={pending} />}
 
       {!loading && !editor && tab === "Personas" && <PersonasView all={data.personas} search={search} setSearch={setSearch}
+        defaultId={data.defaultPersonaId} setDefault={personaId => void action(async () => {
+          setData(await read<Library>(await post("/api/library", { action: "default-persona", personaId })));
+        })}
         create={() => { setPortraitChoice(undefined); setEditor({ kind: "persona" }); }} disabled={pending}
         save={(persona) => action(async () => setData(await read<Library>(await post("/api/library", { ...persona, action: "save-persona" }))))} />}
 

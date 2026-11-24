@@ -1,6 +1,7 @@
+import { workspaceRequest } from "../../../lib/access";
 import { CARD_LIMIT, encodePngCard, exportCard, parseCard, readCardBytes, type CardDraft } from "../../../lib/cards";
 import { fetchPublicCard } from "../../../lib/remote-cards";
-import { failure, field, fields, localRequest, RequestError } from "../../../lib/http";
+import { failure, field, fields, RequestError } from "../../../lib/http";
 import { cardAssets, character, importCharacter, library } from "../../../lib/store";
 
 export const runtime = "nodejs";
@@ -22,7 +23,7 @@ function preview(draft: CardDraft) {
 
 export async function POST(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     purge();
     const action = new URL(request.url).searchParams.get("action");
     if (action === "preview-file") {
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     const params = new URL(request.url).searchParams;
     const id = params.get("id");
     const item = id && character(id);
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
     const format = params.get("format");
     if (format === "portrait") {
       if (!portrait) throw new RequestError("Portrait unavailable.", 404);
-      return new Response(new Uint8Array(portrait), { headers: { "Content-Type": "image/png", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600" } });
+      return new Response(new Uint8Array(portrait), { headers: { "Content-Type": "image/png", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" } });
     }
     const card = exportCard(item, original, params.get("version") === "3" ? 3 : 2);
     const filename = item.name.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "character";

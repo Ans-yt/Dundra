@@ -37,6 +37,15 @@ function database() {
       id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS character_persona_defaults (character_id TEXT PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE, persona_id TEXT NOT NULL REFERENCES personas(id) ON DELETE CASCADE);
+    CREATE TABLE IF NOT EXISTS character_persona_opt_out (
+      character_id TEXT PRIMARY KEY REFERENCES characters(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS workspace_setup (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      default_persona_id TEXT REFERENCES personas(id) ON DELETE SET NULL,
+      name TEXT, salt TEXT, hash TEXT
+    );
+    CREATE TABLE IF NOT EXISTS workspace_sessions (session_key TEXT PRIMARY KEY, expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS lorebooks (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, scan_depth INTEGER NOT NULL, entries TEXT NOT NULL
     );
@@ -284,6 +293,7 @@ function hydrateChat(row: Record<string, SQLOutputValue>): Chat {
 }
 
 const characterQuery = `SELECT c.*, s.creator, s.source, d.alternate_greetings, (SELECT persona_id FROM character_persona_defaults WHERE character_id=c.id) AS default_persona,
+  EXISTS (SELECT 1 FROM character_persona_opt_out WHERE character_id=c.id) AS no_persona,
   d.portrait IS NOT NULL AS has_portrait FROM characters c
   LEFT JOIN character_credits s ON s.character_id = c.id
   LEFT JOIN character_cards d ON d.character_id = c.id`;
@@ -293,7 +303,7 @@ function hydrateCharacter(row: Record<string, SQLOutputValue>): Character {
     id: String(row.id), name: String(row.name), description: String(row.description),
     instructions: String(row.instructions), greeting: String(row.greeting), tags: String(row.tags),
     creator: row.creator == null ? null : String(row.creator), source: row.source == null ? null : String(row.source),
-    defaultPersonaId: row.default_persona ? String(row.default_persona) : undefined,
+    defaultPersonaId: row.no_persona ? "" : row.default_persona ? String(row.default_persona) : undefined,
     alternateGreetings: JSON.parse(String(row.alternate_greetings || "[]")), hasPortrait: Boolean(row.has_portrait),
   };
 }
@@ -305,6 +315,7 @@ export function library() {
     personas: db.prepare(personaQuery + " ORDER BY p.name COLLATE NOCASE").all() as Persona[],
     chats: db.prepare(chatQuery + " ORDER BY c.updated DESC").all().map(hydrateChat),
     model: modelConnection().model || null,
+    defaultPersonaId: workspacePersonaId() || null,
   };
 }
 
@@ -726,8 +737,13 @@ function migrateOpeningVariants(db: DatabaseSync) {
 export function startChat(item: Character, player: Persona | undefined, openingIndex = 0, rememberPersona = false) {
   return transaction(db => {
     if (rememberPersona) {
-      if (player) db.prepare("INSERT OR REPLACE INTO character_persona_defaults VALUES (?, ?)").run(item.id, player.id);
-      else db.prepare("DELETE FROM character_persona_defaults WHERE character_id=?").run(item.id);
+      if (player) {
+        db.prepare("DELETE FROM character_persona_opt_out WHERE character_id = ?").run(item.id);
+        db.prepare("INSERT OR REPLACE INTO character_persona_defaults VALUES (?, ?)").run(item.id, player.id);
+      } else {
+        db.prepare("DELETE FROM character_persona_defaults WHERE character_id = ?").run(item.id);
+        db.prepare("INSERT OR IGNORE INTO character_persona_opt_out VALUES (?)").run(item.id);
+      }
     }
     const id = crypto.randomUUID();
     db.prepare("INSERT INTO chats VALUES (?, ?, ?, ?, ?)").run(id, item.name, item.id, player?.id ?? null, new Date().toISOString());
@@ -1016,4 +1032,60 @@ export function finishMemorySummary(chatId: string, job: NonNullable<ReturnType<
     }
     db.prepare("UPDATE chat_memory SET covered=?, summary=?, book_id=? WHERE chat_id=?").run(job.head, result.summary, bookId, chatId);
   });
+}
+
+type WorkspaceSession = { key: string; expires: number };
+
+export function workspaceSetup() {
+  return database().prepare("SELECT name, salt, hash FROM workspace_setup WHERE id = 1").get() as
+    { name: string | null; salt: string | null; hash: string | null } | undefined;
+}
+
+export function setupPersonas() {
+  return database().prepare("SELECT id, name FROM personas ORDER BY name COLLATE NOCASE").all() as { id: string; name: string }[];
+}
+
+export function workspacePersonaId() {
+  const id = database().prepare("SELECT default_persona_id FROM workspace_setup WHERE id = 1").get()?.default_persona_id;
+  return typeof id === "string" ? id : undefined;
+}
+
+export function setWorkspacePersona(personaId: string | null) {
+  const db = database();
+  if (personaId && !persona(personaId)) throw new RequestError("Persona not found.", 404);
+  if (!db.prepare("UPDATE workspace_setup SET default_persona_id = ? WHERE id = 1").run(personaId).changes) {
+    throw new RequestError("Finish setup before choosing a default persona.", 409);
+  }
+}
+
+export function completeWorkspaceSetup(player: { id: string } | { name: string; description: string },
+  account?: { name: string; salt: string; hash: string }, session?: WorkspaceSession) {
+  transaction(db => {
+    if (workspaceSetup()) throw new RequestError("Setup is already complete. Reload Dundra to continue.", 409);
+    let personaId;
+    if ("id" in player) {
+      if (!persona(player.id)) throw new RequestError("Choose an existing persona.", 404);
+      personaId = player.id;
+    } else {
+      personaId = crypto.randomUUID();
+      db.prepare("INSERT INTO personas VALUES (?, ?, ?)").run(personaId, player.name, player.description);
+    }
+    db.prepare("INSERT INTO workspace_setup VALUES (1, ?, ?, ?, ?)").run(
+      personaId, account?.name ?? null, account?.salt ?? null, account?.hash ?? null);
+    if (session) addWorkspaceSession(session);
+  });
+}
+
+export function addWorkspaceSession(session: WorkspaceSession) {
+  const db = database();
+  db.prepare("DELETE FROM workspace_sessions WHERE expires <= ?").run(Date.now());
+  db.prepare("INSERT INTO workspace_sessions VALUES (?, ?)").run(session.key, session.expires);
+}
+
+export function hasWorkspaceSession(key: string, now: number) {
+  return Boolean(database().prepare("SELECT 1 FROM workspace_sessions WHERE session_key = ? AND expires > ?").get(key, now));
+}
+
+export function deleteWorkspaceSession(key: string) {
+  database().prepare("DELETE FROM workspace_sessions WHERE session_key = ?").run(key);
 }

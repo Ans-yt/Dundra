@@ -1,3 +1,4 @@
+import { workspaceRequest } from "../../../lib/access";
 import { applyRules, withScopedRules } from "../../../lib/regex-server";
 import { presetSettings } from "../../../lib/tavern";
 import { activeLore } from "../../../lib/lore-activation";
@@ -5,7 +6,7 @@ import { withEmbeddedLore } from "../../../lib/lorebook";
 import { attachmentKinds } from "../../../lib/attachment";
 import { arrangePreset } from "../../../lib/preset-prompt";
 import { beginMemorySummary, connectionAdvanced, originalFields, loreTiming, character, linkedChatLorebooks, chatModelConnection, chatOptions, conversation, finishReply, generationConfig, memoryStatus, persona, type ReplyAction } from "../../../lib/store";
-import { failure, field, fields, localRequest, RequestError } from "../../../lib/http";
+import { failure, field, fields, RequestError } from "../../../lib/http";
 import { generate } from "../../../lib/provider";
 import { after } from "next/server";
 import { summarizeChat } from "../../../lib/summarize-chat";
@@ -17,7 +18,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     const body = await fields(request, 11_300_000);
     const id = field(body, "chat", 64, true);
     const current = conversation(id);

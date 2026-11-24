@@ -1,6 +1,7 @@
+import { workspaceRequest } from "../../../lib/access";
 import { applyRules, withScopedRules } from "../../../lib/regex-server";
-import { exportChatFile, importChatFile, originalFields, connectionAdvanced, chatModelConnection, character, changeChatOptions, chatPreferences, chooseChatPersona, chooseChatProfile, chooseChatThinking, conversation, deleteChat, deleteMessagesFrom, editChatMessage, forkChat, library, memoryStatus, persona, renameChat, saveCharacter, savePersona, selectChatVariant, startChat } from "../../../lib/store";
-import { failure, field, fields, localRequest, RequestError } from "../../../lib/http";
+import { exportChatFile, importChatFile, originalFields, connectionAdvanced, chatModelConnection, character, changeChatOptions, chatPreferences, chooseChatPersona, chooseChatProfile, chooseChatThinking, conversation, deleteChat, deleteMessagesFrom, editChatMessage, forkChat, library, memoryStatus, persona, renameChat, saveCharacter, savePersona, selectChatVariant, setWorkspacePersona, startChat, workspacePersonaId } from "../../../lib/store";
+import { failure, field, fields, RequestError } from "../../../lib/http";
 import { alternateGreetings, GREETING_LIMIT, TEXT_LIMIT } from "../../../lib/cards";
 import { readChatOptions } from "../../../lib/chat-options-input";
 import { readImage } from "../../../lib/media";
@@ -26,7 +27,7 @@ function chatSession(id: string) {
 
 export async function GET(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     const query = new URL(request.url).searchParams;
     const memory = query.get("memory");
     if (memory) return Response.json(memoryStatus(memory));
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     const body = await fields(request, new URL(request.url).searchParams.get("format") === "jsonl" ? 24_000_000 : 7_100_000);
     const id = field(body, "id", 64);
     switch (body.action) {
@@ -93,6 +94,9 @@ export async function POST(request: Request) {
         if (id && !persona(id)) throw new RequestError("Persona not found.", 404);
         savePersona({ id: id || crypto.randomUUID(), name: field(body, "name", 80, true), description: field(body, "description", 4_000) }, readImage(body.portrait));
         break;
+      case "default-persona":
+        setWorkspacePersona(field(body, "personaId", 64) || null);
+        break;
       case "import-chat": {
         const item = character(field(body, "character", 64, true));
         if (!item) throw new RequestError("Choose a character for this chat.");
@@ -101,7 +105,7 @@ export async function POST(request: Request) {
       }
       case "start-chat": {
         const item = character(field(body, "character", 64, true));
-        const playerId = body.persona === undefined ? item?.defaultPersonaId : field(body, "persona", 64);
+        const playerId = body.persona === undefined ? (item?.defaultPersonaId ?? workspacePersonaId()) : field(body, "persona", 64);
         const player = playerId ? persona(playerId) : undefined;
         if (!item || (playerId && !player)) throw new RequestError("Character or persona not found.", 404);
         const openings = [item.greeting, ...(item.alternateGreetings || [])].filter(Boolean);

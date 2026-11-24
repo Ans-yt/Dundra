@@ -1,4 +1,5 @@
-import { failure, field, fields, localRequest, RequestError } from "../../../lib/http";
+import { workspaceRequest } from "../../../lib/access";
+import { failure, field, fields, RequestError } from "../../../lib/http";
 import { effectiveModelKey, modelConnection, modelProfiles, removeModelProfile, saveModelConnection, selectModelProfile } from "../../../lib/store";
 import { generate, listModels } from "../../../lib/provider";
 import { defaultGeneration } from "../../../lib/generation";
@@ -22,7 +23,7 @@ function readThinking(body: Record<string, unknown>) {
 
 export async function GET(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     if (new URL(request.url).searchParams.has("profiles")) return Response.json(modelProfiles(), { headers });
     const { endpoint, model, key } = modelConnection();
     return Response.json({ endpoint, model, hasKey: Boolean(key) }, { headers });
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     const body = await fields(request, 10_000);
     const profileId = field(body, "profileId", 64) || undefined;
     if (body.action === "activate" || body.action === "delete-profile") {

@@ -1,5 +1,6 @@
+import { workspaceRequest } from "../../../lib/access";
 import { generationRanges, type GenerationNumber, type GenerationSettings } from "../../../lib/generation";
-import { failure, field, fields, localRequest, RequestError } from "../../../lib/http";
+import { failure, field, fields, RequestError } from "../../../lib/http";
 import { changeGeneration, generationConfig } from "../../../lib/store";
 
 export const runtime = "nodejs";
@@ -22,14 +23,14 @@ function parseSettings(body: Record<string, unknown>): GenerationSettings {
 
 export async function GET(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     return Response.json(generationConfig(), { headers });
   } catch (error) { return failure(error); }
 }
 
 export async function POST(request: Request) {
   try {
-    localRequest(request);
+    workspaceRequest(request);
     const body = await fields(request);
     if (body.action === "save-prompt" || body.action === "delete-prompt" || body.action === "use-prompt") {
       const id = field(body, "id", 64);
