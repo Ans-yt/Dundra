@@ -127,7 +127,8 @@ export function CardsView({ library, onImport }: { library: Library; onImport: (
         <div className="form">
           {library.characters.length > 0 && <><label>Import chat for<select value={chatCharacter || library.characters[0].id} disabled={!!status} onChange={event => setChatCharacter(event.target.value)}>
             {library.characters.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label>SillyTavern chat file<input type="file" accept=".jsonl,application/x-ndjson" disabled={!!status} onChange={async event => {
+            <label className="secondary advanced-upload chat-file-upload"><Upload size={16} aria-hidden="true" /> Choose chat file
+              <input type="file" aria-label="Choose SillyTavern chat file" accept=".jsonl,application/x-ndjson" disabled={!!status} onChange={async event => {
               const file = event.target.files?.[0]; event.target.value = "";
               if (!file) return;
               setError(""); setMessage(""); setStatus("Importing chat…");
@@ -164,21 +165,4 @@ export function CardsView({ library, onImport }: { library: Library; onImport: (
       </>}
     </dialog>
   </section>;
-}
-
-export function AlternateOpenings({ initial }: { initial: string[] }) {
-  const [openings, setOpenings] = useState(() => initial.map((text, key) => ({ key, text })));
-  const next = useRef(initial.length);
-  return <fieldset className="alternate-openings">
-    <legend>Alternate opening messages</legend>
-    {openings.map(({ key, text }, index) => <div className="alternate-input" key={key}>
-      <label>Alternate {index + 1}<textarea name="alternateGreeting" rows={3} maxLength={12000} value={text}
-        onChange={(event) => setOpenings((values) => values.map((item) => item.key === key ? { ...item, text: event.target.value } : item))} /></label>
-      <button className="quiet" type="button" onClick={() => setOpenings((values) => values.filter((item) => item.key !== key))}>Remove alternate {index + 1}</button>
-    </div>)}
-    <button type="button" className="secondary" disabled={openings.length >= 30} onClick={() => {
-      const key = next.current++;
-      setOpenings((values) => [...values, { key, text: "" }]);
-    }}>Add opening message</button>
-  </fieldset>;
 }

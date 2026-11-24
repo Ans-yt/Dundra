@@ -234,6 +234,32 @@ try {
   await library('delete-chat', { id: withoutPersona.id });
   assert.equal((await fetch(base + '/api/lorebooks?book=' + memoryBook.id)).status, 404);
 
+  const portraitBytes = await sharp({ create: { width: 3, height: 2, channels: 3, background: '#a95fba' } }).jpeg().toBuffer();
+  const fields = { name: 'Fixture editor', instructions: 'Stay in character.', greeting: 'Welcome.',
+    alternateGreetings: ['An alternate.'], portrait: 'data:image/jpeg;base64,' + portraitBytes.toString('base64'),
+    lorebookIds: [personaLore.id, characterLore.id] };
+  const { characters: edited } = await library('save-character', fields);
+  const editedCharacter = edited.find(item => item.name === fields.name);
+  const portraitUrl = '/api/cards?format=portrait&id=' + editedCharacter.id;
+  const linksUrl = '/api/lorebooks?scope=character&owner=' + editedCharacter.id;
+  const png = await fetch(base + portraitUrl);
+  assert.equal(png.headers.get('content-type'), 'image/png');
+  assert.equal((await sharp(Buffer.from(await png.arrayBuffer())).metadata()).width, 3);
+  assert.deepEqual((await get(linksUrl)).direct, fields.lorebookIds);
+  const invalidEdit = await post('/api/library', { ...fields, action: 'save-character', id: editedCharacter.id,
+    name: 'Rejected edit', portrait: null, lorebookIds: [characterLore.id, 'missing-book'] });
+  assert.equal(invalidEdit.status, 409);
+  assert.deepEqual((await get(linksUrl)).direct, fields.lorebookIds);
+  assert.equal((await fetch(base + portraitUrl)).status, 200);
+  assert.ok((await get('/api/library')).characters.some(item => item.name === fields.name));
+  const updatedFields = { id: editedCharacter.id, name: fields.name, instructions: fields.instructions, greeting: fields.greeting };
+  await library('save-character', updatedFields);
+  assert.deepEqual((await get(linksUrl)).direct, fields.lorebookIds);
+  assert.equal((await fetch(base + portraitUrl)).status, 200);
+  await library('save-character', { ...updatedFields, portrait: null, lorebookIds: [] });
+  assert.equal((await fetch(base + portraitUrl)).status, 404);
+  assert.deepEqual((await get(linksUrl)).direct, []);
+
   await library('rename-chat', { id: chat, title: 'Signal' });
   assert.equal((await post('/api/library', { action: 'delete-chat', id: chat }, { Origin: 'https://example.com' })).status, 403);
   await stop();
@@ -276,7 +302,7 @@ try {
   const newCookie = login.headers.get('set-cookie').split(';')[0];
   assert.deepEqual(await get('/api/onboarding', { Cookie: newCookie }), { stage: 'ready' });
   assert.equal((await get('/api/library', { Cookie: newCookie })).defaultPersonaId, account.personaId);
-  console.log('Production smoke passed: avatar setup, persona defaults, lorebook activation and images, manual and automatic memory, recovery, guarded routes, sign-in, restart, chat and streaming.');
+  console.log('Production smoke passed: avatar setup, persona defaults, character editor data and rollback, lorebook activation and images, manual and automatic memory, recovery, guarded routes, sign-in, restart, chat and streaming.');
 } finally {
   await stop();
   provider.closeAllConnections();

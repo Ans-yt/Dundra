@@ -642,8 +642,21 @@ export function conversation(id: string): Conversation | null {
   return { chat: hydrateChat(chat), messages, revision };
 }
 
-export function saveCharacter(item: Character) {
-  transaction((db) => writeCharacter(db, item));
+export function saveCharacter(item: Character, { portrait, lorebookIds }: { portrait?: Uint8Array | null; lorebookIds?: string[] } = {}) {
+  transaction(db => {
+    writeCharacter(db, item);
+    if (portrait !== undefined) {
+      db.prepare(`INSERT INTO character_cards (character_id, portrait) VALUES (?, ?)
+        ON CONFLICT(character_id) DO UPDATE SET portrait = excluded.portrait`).run(item.id, portrait);
+    }
+    if (lorebookIds !== undefined) {
+      const available = new Set(lorebookList().map(book => book.id));
+      if (lorebookIds.some(id => !available.has(id))) throw new RequestError("A selected lorebook is no longer available. Reopen the character and try again.", 409);
+      db.prepare("DELETE FROM character_lorebooks WHERE owner_id = ?").run(item.id);
+      const attach = db.prepare("INSERT INTO character_lorebooks VALUES (?, ?)");
+      for (const id of lorebookIds) attach.run(item.id, id);
+    }
+  });
 }
 
 function writeCharacter(db: DatabaseSync, item: Character) {

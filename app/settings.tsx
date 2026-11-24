@@ -20,8 +20,8 @@ const sections = [
 export function SettingsView({ advanced, onSaved }: { advanced: Advanced; onSaved: (model: string | null) => void }) {
   const [active, setActive] = useState<(typeof sections)[number]["id"]>("model");
   return <section className="section settings-layout">
+    <header className="section-head settings-head"><h1>Settings</h1></header>
     <aside className="settings-sidebar">
-      <h1>Settings</h1>
       <nav aria-label="Settings sections">{sections.map(({ id, label, icon: Icon }) =>
         <button key={id} type="button" aria-current={active === id ? "page" : undefined} onClick={() => setActive(id)}>
           <Icon size={17} />{label}

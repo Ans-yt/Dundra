@@ -111,7 +111,7 @@ const markdownComponents: Components = {
   img: ({ src, alt }) => typeof src === "string" && src ? <img src={src} alt={alt || ""} loading="lazy" referrerPolicy="no-referrer" /> : null,
 };
 
-const MessageMarkdown = memo(function MessageMarkdown({ content }: { content: string }) {
+export const MessageMarkdown = memo(function MessageMarkdown({ content }: { content: string }) {
   return <div className="chat-prose"><Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}
     components={markdownComponents}>{content}</Markdown></div>;
 });

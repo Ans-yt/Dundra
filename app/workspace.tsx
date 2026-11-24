@@ -60,15 +60,15 @@ export function ContinueShelf({ chats, open, disabled, heading = "Continue chatt
   </section>;
 }
 
-function Manager({ title, search, change, sort, options, setSort, children }: {
-  title: string; search: string; change: (value: string) => void; sort: string;
+function Manager({ title, summary, action, search, change, sort, options, setSort, children }: {
+  title: string; summary: string; action?: ReactNode; search: string; change: (value: string) => void; sort: string;
   options: { value: string; label: string }[]; setSort: (value: string) => void; children: ReactNode;
 }) {
   return <section className="manager">
+    <header className="section-head manager-head"><div><h1>{title}</h1><p>{summary}</p></div>{action}</header>
     <aside className="manager-side">
-      <h1>{title}</h1>
       <div className="manager-filters">
-        <SearchField value={search} change={change} label={"Search " + title.toLowerCase().replace("my ", "")} />
+        <SearchField value={search} change={change} label={"Search " + title.toLowerCase()} />
         <label className="sort"><span>Sort by</span><select value={sort} onChange={(e) => setSort(e.target.value)}>
           {options.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
         </select></label>
@@ -84,17 +84,16 @@ export function ChatsView({ all, characters, search, setSearch, open, start, rem
 }) {
   const [sort, setSort] = useState("latest");
   const query = search.trim().toLowerCase();
-  const matches = all.filter((chat) => [chat.title, chat.character, chat.persona].join(" ").toLowerCase().includes(query));
-  const chats = [...matches].sort((a, b) => sort === "oldest" ? a.updated.localeCompare(b.updated) : b.updated.localeCompare(a.updated));
+  const chats = all.filter((chat) => [chat.title, chat.character, chat.persona].join(" ").toLowerCase().includes(query))
+    .sort((a, b) => sort === "oldest" ? a.updated.localeCompare(b.updated) : b.updated.localeCompare(a.updated));
   const groups = new Map<string, Chat[]>();
   for (const chat of chats) {
     const group = groups.get(chat.character_id);
     if (group) group.push(chat);
     else groups.set(chat.character_id, [chat]);
   }
-  return <Manager title="My Chats" search={search} change={setSearch} sort={sort} setSort={setSort}
+  return <Manager title="Chats" summary={`${plural(groups.size, "character")} · ${plural(chats.length, "conversation")}`} search={search} change={setSearch} sort={sort} setSort={setSort}
     options={[{ value: "latest", label: "Latest activity" }, { value: "oldest", label: "Oldest activity" }]}>
-    <header className="manager-head"><div><h2>All chats</h2><p>{plural(groups.size, "character")} · {plural(chats.length, "conversation")}</p></div></header>
     {!query && <ContinueShelf chats={all} open={open} disabled={disabled} heading="Continue" />}
     {groups.size > 0 && <div className="list-label">By character</div>}
     {[...groups.values()].map((group) => {
@@ -106,7 +105,6 @@ export function ChatsView({ all, characters, search, setSearch, open, start, rem
           <ChevronRight size={17} className="disclosure-arrow" />
         </summary>
         <div className="group-content">
-          {character && <button className="secondary" onClick={() => start(character)} disabled={disabled} aria-label={"New chat with " + first.character}><Plus size={15} /> New chat</button>}
           {group.map((chat) => <div className="conversation-item" key={chat.id}>
             <button className="conversation-row" onClick={() => open(chat.id)} disabled={disabled}>
               <span className="stacked"><strong>{chat.title}</strong><small>{chat.preview || "Open conversation"}</small></span>
@@ -118,6 +116,7 @@ export function ChatsView({ all, characters, search, setSearch, open, start, rem
             <button type="button" className="quiet danger" title="Delete chat" aria-label={"Delete chat " + chat.title} disabled={disabled}
               onClick={() => remove(chat)}><Trash2 size={16} aria-hidden="true" /></button>
           </div>)}
+          {character && <footer className="group-actions"><button className="secondary" onClick={() => start(character)} disabled={disabled} aria-label={"New chat with " + first.character}><Plus size={15} /> New chat</button></footer>}
         </div>
       </details>;
     })}
@@ -164,11 +163,9 @@ export function PersonasView({ all, search, setSearch, create, save, disabled, d
   const query = search.trim().toLowerCase();
   const items = all.filter((item) => (item.name + " " + item.description).toLowerCase().includes(query));
   if (sort === "reverse") items.reverse();
-  return <Manager title="My Personas" search={search} change={setSearch} sort={sort} setSort={setSort}
+  return <Manager title="Personas" summary={plural(items.length, "persona")}
+    action={<button className="primary" onClick={create}><Plus size={17} /> New persona</button>} search={search} change={setSearch} sort={sort} setSort={setSort}
     options={[{ value: "name", label: "Name A–Z" }, { value: "reverse", label: "Name Z–A" }]}>
-    <header className="manager-head"><div><h2>Your personas</h2><p>{plural(items.length, "persona")}</p></div>
-      <button className="primary" onClick={create}><Plus size={17} /> New persona</button>
-    </header>
     {all.length > 0 && <label className="persona-default">Default persona
       <select value={defaultId ?? ""} disabled={disabled} onChange={event => setDefault(event.target.value)}>
         <option value="">No default persona</option>

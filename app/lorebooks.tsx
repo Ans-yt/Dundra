@@ -80,9 +80,11 @@ export function LoreLinks({ scope, id, contextKey, disabled }: { scope: LoreScop
   </>;
 }
 
-export function LorebookEditor({ chatId, initialBook }: { chatId?: string; initialBook?: string } = {}) {
+export function LorebookEditor({ chatId, initialBook, create, onSaved }: {
+  chatId?: string; initialBook?: string; create?: boolean; onSaved?: (book: Lorebook) => void;
+} = {}) {
   const { data, error: loadError } = useBooks(chatId ? "?" + new URLSearchParams({ scope: "chat", owner: chatId }) : "");
-  const [book, setBook] = useState<Lorebook>();
+  const [book, setBook] = useState<Lorebook | undefined>(() => create ? { id: "", name: "", scan_depth: 4, entries: [] } : undefined);
   const [opening, setOpening] = useState(Boolean(initialBook));
   useEffect(() => {
     if (!initialBook) return;
@@ -186,8 +188,9 @@ export function LorebookEditor({ chatId, initialBook }: { chatId?: string; initi
         onClick={() => { setQuery(""); const entry = blankLoreEntry(); setBook({ ...book, entries: [entry, ...book.entries] }); setOpenEntry(entry.id); }}><Plus size={16} /> Add entry</button>
       <div className="transfer-actions">
         <button type="button" className="primary" disabled={busy || !book.name.trim() || book.scan_depth < 1 || book.scan_depth > 100} onClick={() => void perform(async () => {
-          setBook(await read<Lorebook>("", { action: "save", id: book.id, book }));
-          changed(); setStatus("Lorebook saved.");
+          const saved = await read<Lorebook>("", { action: "save", id: book.id, book });
+          setBook(saved);
+          changed(); setStatus("Lorebook saved."); onSaved?.(saved);
         })}>Save lorebook</button>
         <button type="button" className="secondary" disabled={busy} onClick={() => downloadJson(book.name || "lorebook", {
           name: book.name, scan_depth: book.scan_depth, token_budget: book.token_budget ?? 0,

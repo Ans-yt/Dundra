@@ -5,6 +5,7 @@ import { failure, field, fields, RequestError } from "../../../lib/http";
 import { alternateGreetings, GREETING_LIMIT, TEXT_LIMIT } from "../../../lib/cards";
 import { readChatOptions } from "../../../lib/chat-options-input";
 import { readImage } from "../../../lib/media";
+import sharp from "sharp";
 import { summarizeChat } from "../../../lib/summarize-chat";
 import { after } from "next/server";
 
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     workspaceRequest(request);
-    const body = await fields(request, new URL(request.url).searchParams.get("format") === "jsonl" ? 24_000_000 : 7_100_000);
+    const body = await fields(request, new URL(request.url).searchParams.get("format") === "jsonl" ? 24_000_000 : 9_000_000);
     const id = field(body, "id", 64);
     switch (body.action) {
       case "chat-options":
@@ -85,9 +86,9 @@ export async function POST(request: Request) {
       }
       case "chat-thinking":
         return Response.json(chooseChatThinking(id, field(body, "profileId", 64, true), field(body, "level", 32)));
-      case "save-character":
+      case "save-character": {
         if (id && !character(id)) throw new RequestError("Character not found.", 404);
-        saveCharacter({
+        const item = {
           id: id || crypto.randomUUID(),
           name: field(body, "name", 80, true),
           description: field(body, "description", 600),
@@ -95,8 +96,23 @@ export async function POST(request: Request) {
           greeting: field(body, "greeting", GREETING_LIMIT),
           alternateGreetings: body.alternateGreetings === undefined ? undefined : alternateGreetings(body.alternateGreetings),
           tags: field(body, "tags", 5_000),
-        });
+        };
+        const links = body.lorebookIds;
+        if (links !== undefined && (!Array.isArray(links) ||
+            links.some(id => typeof id !== "string" || !id || id.length > 64) || new Set(links).size !== links.length)) {
+          throw new RequestError("Choose a valid list of lorebooks.");
+        }
+        const image = readImage(body.portrait);
+        let portrait: Buffer | null | undefined = image == null ? image : undefined;
+        if (image) {
+          try {
+            portrait = await sharp(image.bytes, { limitInputPixels: 32_000_000 })
+              .rotate().resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true }).png().toBuffer();
+          } catch { throw new RequestError("Dundra could not decode that portrait. Choose a different image."); }
+        }
+        saveCharacter(item, { portrait, lorebookIds: links });
         break;
+      }
       case "save-persona":
         if (id && !persona(id)) throw new RequestError("Persona not found.", 404);
         savePersona({ id: id || crypto.randomUUID(), name: field(body, "name", 80, true), description: field(body, "description", 4_000) }, readImage(body.portrait));

@@ -8,5 +8,6 @@ const icons = {
 } as const;
 
 export function NavigationIcon({ name }: { name: keyof typeof icons }) {
-  return <span className="navigation-icon" aria-hidden="true" style={{ maskImage: `url("${icons[name]}")` }} />;
+  const icon = <span className="navigation-icon" aria-hidden="true" style={{ maskImage: `url("${icons[name]}")` }} />;
+  return name === "brand" ? <span className="brand-mark" aria-hidden="true">{icon}</span> : icon;
 }

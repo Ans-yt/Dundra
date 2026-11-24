@@ -6,7 +6,8 @@ import { NavigationIcon } from "./navigation-icon";
 import { WorkspaceGate } from "./onboarding";
 import type { Character, Chat, ChatPreferences, ChatSession, Library, Persona } from "../lib/types";
 import { ChatsView, ContinueShelf, Mark, PersonasView, SearchField } from "./workspace";
-import { AlternateOpenings, CardsView } from "./cards";
+import { CardsView } from "./cards";
+import { CharacterEditor } from "./character-editor";
 import { SettingsView } from "./settings";
 import { useAdvanced } from "./advanced";
 import { useVisualPreferences } from "./visual-settings";
@@ -14,7 +15,6 @@ import { ChatWorkspace, type ReplyMode, type ReplyPreview } from "./chat-workspa
 import { ImagePicker, mediaUrl } from "./media";
 import { PresetDialog } from "./preset-dialog";
 import { TokenCount, useTokenCounter } from "./token-count";
-import { LoreLinks } from "./lorebooks";
 import { chatImportBody } from "./chat-transfer";
 import type { MemoryStatus } from "../lib/auto-memory";
 
@@ -172,13 +172,13 @@ function Workspace() {
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    saveEditor({ ...Object.fromEntries(new FormData(event.currentTarget)), portrait: portraitChoice });
+  }
+
+  function saveEditor(fields: object) {
     if (!editor) return;
-    const form = new FormData(event.currentTarget);
-    const alternateGreetings = editor.kind === "character" ? form.getAll("alternateGreeting") : undefined;
-    form.delete("alternateGreeting");
     void action(async () => {
-      setData(await read<Library>(await post("/api/library", { ...Object.fromEntries(form), alternateGreetings,
-        portrait: editor.kind === "persona" ? portraitChoice : undefined, action: "save-" + editor.kind, id: editor.item?.id })));
+      setData(await read<Library>(await post("/api/library", { ...fields, action: "save-" + editor.kind, id: editor.item?.id })));
       setEditor(null);
     });
   }
@@ -372,27 +372,22 @@ function Workspace() {
     </header>
     <main id="workspace">
       {loading && <Notice>Opening your workspace…</Notice>}
-      {error && <div className="error" role="alert">{error}</div>}
+      {error && editor?.kind !== "character" && <div className="error" role="alert">{error}</div>}
 
       {!loading && editor && <Section title={editor.item ? "Edit " + editor.kind : "New " + editor.kind}
-        action={<button className="secondary" disabled={pending} onClick={() => setEditor(null)}><ArrowLeft size={16} /> Back</button>}>
-        <form className="form" key={editor.kind + (editor.item?.id || "new")} onSubmit={save}>
-          <div className={editor.kind === "persona" ? "persona-identity" : undefined}>
-            {editor.kind === "persona" && <ImagePicker avatar label="Persona image" disabled={pending}
+        action={<button className="secondary" disabled={pending} onClick={() => { setError(""); setEditor(null); }}><ArrowLeft size={16} /> Back</button>}>
+        {editor.kind === "character" ? <CharacterEditor key={editor.item?.id ?? "new"} item={editor.item}
+          player={data.personas.find(persona => persona.id === (editor.item?.defaultPersonaId ?? data.defaultPersonaId))?.name ?? "You"}
+          pending={pending} error={error} save={saveEditor} /> : <form className="form" onSubmit={save}>
+          <div className="persona-identity">
+            <ImagePicker avatar label="Persona image" disabled={pending}
               src={portraitChoice === undefined && editor.item?.portrait ? mediaUrl("persona", editor.item.id, editor.item.portrait) : portraitChoice}
-              change={setPortraitChoice} />}
+              change={setPortraitChoice} />
             <label>Name<input name="name" required maxLength={80} defaultValue={editor.item?.name} autoFocus /></label>
           </div>
-          <label>Description<textarea name="description" maxLength={editor.kind === "character" ? 600 : 4000} rows={3} defaultValue={editor.item?.description} /></label>
-          {editor.kind === "character" && <>
-            <label>Character instructions<textarea name="instructions" required maxLength={80000} rows={5} defaultValue={editor.item?.instructions} /></label>
-            <label>Opening message<textarea name="greeting" maxLength={12000} rows={4} defaultValue={editor.item?.greeting} /></label>
-            <AlternateOpenings initial={editor.item?.alternateGreetings || []} />
-            <label>Tags<input name="tags" maxLength={5000} placeholder="Mystery, Fantasy" defaultValue={editor.item?.tags} /></label>
-            {editor.item && <LoreLinks scope="character" id={editor.item.id} />}
-          </>}
-          <button className="primary" disabled={pending}>{pending ? "Saving…" : "Save " + editor.kind}</button>
-        </form>
+          <label>Description<textarea name="description" maxLength={4000} rows={3} defaultValue={editor.item?.description} /></label>
+          <button className="primary" disabled={pending}>{pending ? "Saving…" : "Save persona"}</button>
+        </form>}
       </Section>}
 
       {!loading && !editor && selected && <PresetDialog compact title={"New chat with " + selected.name} close={() => { if (!pending) setSelected(null); }}>
