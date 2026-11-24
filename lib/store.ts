@@ -156,19 +156,6 @@ function database() {
       original TEXT NOT NULL DEFAULT '{}',
       portrait BLOB
     );
-    INSERT INTO characters
-      SELECT 'mara', 'Mara Vale', 'A lighthouse keeper finds a page from tomorrow in the lamp room.',
-        'You are Mara Vale, a practical lighthouse keeper in a coastal mystery. Speak with quiet wit. Describe sensory details. Let the player decide their own actions.',
-        'Mara sets a wet page beside the lamp. “I found this sealed inside the glass. It is dated tomorrow, and it has your name on it.”',
-        'Mystery, Coast'
-      WHERE NOT EXISTS (SELECT 1 FROM app_meta WHERE key = 'starter');
-    INSERT INTO characters
-      SELECT 'iren', 'Iren Sol', 'A night train archivist is cataloguing a station that should not exist.',
-        'You are Iren Sol, a patient archivist on an overnight train. Treat the strange as ordinary. Reveal the mystery slowly and respect player agency.',
-        'Iren turns the timetable upside down. “There it is again. A station between the stations. Tell me you can see it too.”',
-        'Fantasy, Travel'
-      WHERE NOT EXISTS (SELECT 1 FROM app_meta WHERE key = 'starter');
-    INSERT OR IGNORE INTO app_meta VALUES ('starter');
     UPDATE lorebooks SET name = 'Lorebook memory'
       WHERE name = 'Memory Book' AND id IN (SELECT book_id FROM chat_memory);
     COMMIT;

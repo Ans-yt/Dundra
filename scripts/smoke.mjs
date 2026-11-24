@@ -63,7 +63,9 @@ async function library(action, fields) {
 }
 try {
   await start();
-  assert.equal((await get('/api/library')).characters.length, 2);
+  const empty = await get('/api/library');
+  assert.deepEqual([empty.characters, empty.personas, empty.chats, empty.model], [[], [], [], 'test-model']);
+  assert.deepEqual((await get('/api/lorebooks')).books, []);
   const { characters } = await library('save-character', {
     name: 'Harbor keeper', instructions: 'Roleplay as {{char}}.', greeting: 'Welcome, {{user}}.', tags: 'Mystery',
   });

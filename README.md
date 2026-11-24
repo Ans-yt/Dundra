@@ -44,4 +44,4 @@ The smoke test uses a local test model and a temporary database.
 
 Dundra is licensed under [GNU AGPL v3](LICENSE), the same license as SillyTavern.
 
-The navigation uses [Gentleface icons](https://gentleface.com/) under the [MIT license](LICENSE-Gentleface). The starter covers use Claude Monet’s [*Arrival of the Normandy Train, Gare Saint-Lazare*](https://commons.wikimedia.org/wiki/File:Claude_Monet_-_Arrival_of_the_Normandy_Train,_Gare_Saint-Lazare_-_Google_Art_Project.jpg) and Winslow Homer’s [*The Herring Net*](https://commons.wikimedia.org/wiki/File:Winslow_Homer_-_The_Herring_Net.jpg), both public domain works from the Art Institute of Chicago.
+The navigation uses [Gentleface icons](https://gentleface.com/) under the [MIT license](LICENSE-Gentleface).

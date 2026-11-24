@@ -1,5 +1,3 @@
-import sharp from "sharp";
-import { join } from "node:path";
 import { CARD_LIMIT, encodePngCard, exportCard, parseCard, readCardBytes, type CardDraft } from "../../../lib/cards";
 import { fetchPublicCard } from "../../../lib/remote-cards";
 import { failure, field, fields, localRequest, RequestError } from "../../../lib/http";
@@ -65,8 +63,7 @@ export async function GET(request: Request) {
     const card = exportCard(item, original, params.get("version") === "3" ? 3 : 2);
     const filename = item.name.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "character";
     if (format === "png") {
-      const cover = portrait ?? (item.id === "mara" || item.id === "iren" ? await sharp(join(process.cwd(), "public", "covers", item.id + ".jpg")).png().toBuffer() : null);
-      return new Response(new Uint8Array(encodePngCard(cover, card)), {
+      return new Response(new Uint8Array(encodePngCard(portrait ?? null, card)), {
         headers: { "Content-Type": "image/png", "Content-Disposition": 'attachment; filename="' + filename + '.png"' },
       });
     }

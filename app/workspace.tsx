@@ -15,7 +15,7 @@ export function SearchField({ value, change, label }: { value: string; change: (
 
 export function Mark({ id, name, cover = false, hasPortrait = false, src }: { id?: string; name: string; cover?: boolean; hasPortrait?: boolean; src?: string }) {
   const illustration = src || (hasPortrait && id ? "/api/cards?format=portrait&id=" + encodeURIComponent(id)
-    : id === "iren" || id === "mara" ? "/covers/" + id + ".jpg" : undefined);
+    : undefined);
   return <span className={cover ? "cover" : "thumbnail"} aria-hidden="true">
     {name.trim().slice(0, 1).toUpperCase()}{illustration && <img key={illustration} src={illustration} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />}
   </span>;
