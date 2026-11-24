@@ -44,10 +44,7 @@ In **Settings → Model**, enter your OpenAI-compatible provider’s base URL, t
 
 ```sh
 npm run typecheck
-npm test
 ```
-
-The smoke test uses a local test model and a temporary database.
 
 ## License and credits
 

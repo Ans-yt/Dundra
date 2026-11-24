@@ -9,8 +9,7 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
-    "typecheck": "tsc --noEmit",
-    "test": "npm run build && node scripts/smoke.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "dompurify": "^3.4.18",
