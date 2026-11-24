@@ -5,7 +5,7 @@ import type { Lorebook, LoreEntry } from "./lorebook";
 
 type Source = Pick<Lorebook, "entries" | "scan_depth" | "token_budget" | "image_attachments"> & { id?: string };
 export type LoreContext = {
-  character?: string; characterId?: string; tags?: string[]; trigger?: string; seed?: string;
+  character?: string; nickname?: string; characterId?: string; tags?: string[]; trigger?: string; seed?: string;
   messageCount?: number; previous?: Record<string, number>;
 };
 
@@ -24,7 +24,7 @@ function contains(text: string, needle: string, whole: boolean) {
 function matchesContext(entry: LoreEntry, context: LoreContext) {
   if (entry.triggers?.length && !entry.triggers.includes(context.trigger ?? "normal")) return false;
   if (!entry.characters?.length && !entry.tags?.length) return true;
-  const names = [context.character, context.characterId].filter(Boolean).map(name => name!.toLowerCase());
+  const names = [context.character, context.nickname, context.characterId].filter(Boolean).map(name => name!.toLowerCase());
   const tags = context.tags?.map(tag => tag.trim().toLowerCase()) ?? [];
   const listed = entry.characters?.some(name => names.includes(name.toLowerCase().replace(/\.png$/, "")))
     || entry.tags?.some(tag => tags.includes(tag.toLowerCase()));

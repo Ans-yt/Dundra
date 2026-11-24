@@ -9,7 +9,7 @@ import type { CardDraft, CardFields } from "./cards";
 import { defaultGeneration, effectivePrompt, type GenerationConfig } from "./generation";
 import { countTextTokens } from "./tokens";
 import { defaultChatOptions, type ChatOptions } from "./chat-options";
-import { chatHistoryText, expandNames } from "./chat-text";
+import { chatHistoryText, chatNameInstruction, expandNames } from "./chat-text";
 import type { StoredImage } from "./media";
 
 import type { Character, Chat, ChatPreferences, Conversation, Message, ModelProfile, ModelProfiles, ModelThinking, Persona } from "./types";
@@ -281,23 +281,26 @@ export function originalFields(id:string): CardFields {
   const row = database().prepare("SELECT original FROM character_cards WHERE character_id=?").get(id);
   return row ? JSON.parse(String(row.original)) : {};
 }
-const chatQuery = `SELECT c.*, x.name AS character, p.name AS persona, pp.version AS personaPortrait,
-    EXISTS(SELECT 1 FROM character_cards d WHERE d.character_id = x.id AND d.portrait IS NOT NULL) AS has_portrait,
+const cardNickname = `CASE WHEN json_type(d.original, '$.extras.nickname') = 'text'
+  THEN NULLIF(substr(trim(json_extract(d.original, '$.extras.nickname')), 1, 80), '') END`;
+const chatQuery = `SELECT c.*, COALESCE(${cardNickname}, x.name) AS character, p.name AS persona, pp.version AS personaPortrait,
+    d.portrait IS NOT NULL AS has_portrait,
     (SELECT substr(CASE WHEN coalesce(v.reasoning, '') <> '' THEN 'Thoughts · ' || v.reasoning
        WHEN lower(ltrim(m.content)) LIKE '<think>%' THEN 'Thoughts · ' || replace(substr(ltrim(m.content), 8), '</think>', ' · ')
        ELSE m.content END, 1, 240) FROM messages m LEFT JOIN message_variants v ON v.message_id=m.id AND v.active=1 WHERE m.chat_id = c.id ORDER BY m.id DESC LIMIT 1) AS preview,
     (SELECT count(*) FROM messages m WHERE m.chat_id = c.id) AS message_count
-  FROM chats c JOIN characters x ON x.id = c.character_id LEFT JOIN personas p ON p.id = c.persona_id
+  FROM chats c JOIN characters x ON x.id = c.character_id LEFT JOIN character_cards d ON d.character_id = x.id LEFT JOIN personas p ON p.id = c.persona_id
   LEFT JOIN persona_portraits pp ON pp.id = p.id`;
 
 const personaQuery = `SELECT p.*, pp.version AS portrait FROM personas p LEFT JOIN persona_portraits pp ON pp.id = p.id`;
 
 function hydrateChat(row: Record<string, SQLOutputValue>): Chat {
   const { has_portrait, ...chat } = row;
-  return { ...chat as Omit<Chat, "hasPortrait">, hasPortrait: Boolean(has_portrait) };
+  const result = chat as Omit<Chat, "hasPortrait">;
+  return { ...result, title: result.title || result.character, hasPortrait: Boolean(has_portrait) };
 }
 
-const characterQuery = `SELECT c.*, s.creator, s.source, d.alternate_greetings, (SELECT persona_id FROM character_persona_defaults WHERE character_id=c.id) AS default_persona,
+const characterQuery = `SELECT c.*, ${cardNickname} AS nickname, s.creator, s.source, d.alternate_greetings, (SELECT persona_id FROM character_persona_defaults WHERE character_id=c.id) AS default_persona,
   EXISTS (SELECT 1 FROM character_persona_opt_out WHERE character_id=c.id) AS no_persona,
   d.portrait IS NOT NULL AS has_portrait FROM characters c
   LEFT JOIN character_credits s ON s.character_id = c.id
@@ -305,7 +308,7 @@ const characterQuery = `SELECT c.*, s.creator, s.source, d.alternate_greetings, 
 
 function hydrateCharacter(row: Record<string, SQLOutputValue>): Character {
   return {
-    id: String(row.id), name: String(row.name), description: String(row.description),
+    id: String(row.id), name: String(row.name), nickname: typeof row.nickname === "string" ? row.nickname : undefined, description: String(row.description),
     instructions: String(row.instructions), greeting: String(row.greeting), tags: String(row.tags),
     creator: row.creator == null ? null : String(row.creator), source: row.source == null ? null : String(row.source),
     defaultPersonaId: row.no_persona ? "" : row.default_persona ? String(row.default_persona) : undefined,
@@ -477,6 +480,7 @@ export function chatPreferences(id: string, session?: Conversation): ChatPrefere
   let promptTokens = countTextTokens(effectivePrompt(generation, connection.promptId));
   const targets = session?.chat ?? loreTargets(id);
   const books = targets ? linkedChatLorebooks(targets) : [];
+  const actor = targets ? character(targets.character_id) : undefined;
   if (targets && (preset || books.length || options.authorNote)) {
     const current = session ?? conversation(id);
     if (current) {
@@ -491,8 +495,7 @@ export function chatPreferences(id: string, session?: Conversation): ChatPrefere
         role: message.role,
         content: chatHistoryText(message, options.formats, chat.character, chat.persona || "you"),
       }));
-      const actor = character(chat.character_id);
-      const context = { character: chat.character, characterId: chat.character_id, tags: actor?.tags.split(","), seed: id,
+      const context = { character: actor?.name, nickname: chat.character, characterId: chat.character_id, tags: actor?.tags.split(","), seed: id,
         messageCount: messages.length, previous: loreTiming(id), trigger: "normal" };
       const lore = activeLore(books, history, context);
       const embedded = preset?.prompt_order?.length ? activeLore(withEmbeddedLore(originalFields(chat.character_id).character_book, []), history, context) : undefined;
@@ -514,6 +517,7 @@ export function chatPreferences(id: string, session?: Conversation): ChatPrefere
       if (preset) promptTokens += countTextTokens(prefill);
     }
   }
+  if (actor?.nickname) promptTokens += countTextTokens(chatNameInstruction(actor.name, actor.nickname));
   const background = database().prepare("SELECT version FROM chat_backgrounds WHERE id = ?").get(id);
   return {
     profileId, thinkingLevel, profilePreset: cfg.presets && cfg.selected === connection.presetName ? connection.presetName : "", activeProfileId: activeModelProfile(),
@@ -645,7 +649,11 @@ export function conversation(id: string): Conversation | null {
 
 export function saveCharacter(item: Character, { portrait, lorebookIds }: { portrait?: Uint8Array | null; lorebookIds?: string[] } = {}) {
   transaction(db => {
+    const previous = item.nickname ? character(item.id) : undefined;
     writeCharacter(db, item);
+    if (previous && !previous.nickname) {
+      db.prepare("UPDATE chats SET title = '' WHERE character_id = ? AND title = ?").run(item.id, previous.name);
+    }
     if (portrait !== undefined) {
       db.prepare(`INSERT INTO character_cards (character_id, portrait) VALUES (?, ?)
         ON CONFLICT(character_id) DO UPDATE SET portrait = excluded.portrait`).run(item.id, portrait);
@@ -669,6 +677,11 @@ function writeCharacter(db: DatabaseSync, item: Character) {
     db.prepare(`INSERT INTO character_cards (character_id, alternate_greetings) VALUES (?, ?)
       ON CONFLICT(character_id) DO UPDATE SET alternate_greetings = excluded.alternate_greetings`)
       .run(item.id, JSON.stringify(item.alternateGreetings));
+  }
+  if (item.nickname !== undefined) {
+    db.prepare(`INSERT INTO character_cards (character_id, original) VALUES (?, json_set('{}', '$.extras.nickname', ?))
+      ON CONFLICT(character_id) DO UPDATE SET original = json_set(original, '$.extras.nickname', ?)`)
+      .run(item.id, item.nickname, item.nickname);
   }
 }
 
@@ -764,9 +777,9 @@ export function startChat(item: Character, player: Persona | undefined, openingI
       }
     }
     const id = crypto.randomUUID();
-    db.prepare("INSERT INTO chats VALUES (?, ?, ?, ?, ?)").run(id, item.name, item.id, player?.id ?? null, new Date().toISOString());
+    db.prepare("INSERT INTO chats VALUES (?, ?, ?, ?, ?)").run(id, "", item.id, player?.id ?? null, new Date().toISOString());
     const greetings = [item.greeting, ...(item.alternateGreetings ?? [])].filter(Boolean)
-      .map(text => expandNames(text, item.name, player?.name || "you"));
+      .map(text => expandNames(text, item.nickname || item.name, player?.name || "you"));
     const opening = greetings[openingIndex];
     if (opening) {
       const row = db.prepare("INSERT INTO messages (chat_id, role, content) VALUES (?, 'assistant', ?)").run(id, opening);
@@ -793,7 +806,7 @@ export function importChatFile(item: Character, text: string, title: string) {
   return transaction(db => {
     const id = crypto.randomUUID();
     const player = db.prepare("SELECT id FROM personas WHERE name=? COLLATE NOCASE LIMIT 1").get(String(header.user_name || ""));
-    db.prepare("INSERT INTO chats VALUES (?, ?, ?, ?, ?)").run(id, title || item.name, item.id, player?.id ?? null, new Date().toISOString());
+    db.prepare("INSERT INTO chats VALUES (?, ?, ?, ?, ?)").run(id, title, item.id, player?.id ?? null, new Date().toISOString());
     db.prepare("INSERT INTO chat_transfer_headers VALUES (?,?)").run(id, JSON.stringify(header));
     const insert = db.prepare("INSERT INTO messages (chat_id,role,content) VALUES (?,?,?)");
     const variant = db.prepare("INSERT INTO message_variants VALUES (?,?,?,?,0,?)");

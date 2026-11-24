@@ -288,6 +288,44 @@ try {
   assert.equal((await fetch(base + portraitUrl)).status, 404);
   assert.deepEqual((await get(linksUrl)).direct, []);
 
+  const nicknameFields = {
+    name: 'Atlas of the coast', nickname: '  World  ', greeting: 'Greetings from {{char}}, {{user}}.',
+    instructions: 'Describe the terrain as {{char}}.', alternateGreetings: ['Welcome to {{char}}.'],
+  };
+  const { characters: withNick } = await library('save-character', nicknameFields);
+  const nicknamed = withNick.find(item => item.name === nicknameFields.name);
+  assert.equal(nicknamed.nickname, 'World');
+  const { id: nickChat } = await library('start-chat', { character: nicknamed.id });
+  const { id: namedChat } = await library('start-chat', { character: nicknamed.id });
+  const nickUrl = '/api/library?chat=' + nickChat;
+  const namedUrl = '/api/library?chat=' + namedChat;
+  const session = await get(nickUrl);
+  assert.equal(session.chat.character, 'World');
+  assert.equal(session.chat.title, 'World');
+  assert.equal(session.messages[0].content, 'Greetings from World, Quinn.');
+  await library('rename-chat', { id: namedChat, title: 'A new campaign' });
+  const sent = await post('/api/reply', { chat: nickChat, message: 'Have I arrived in {{char}}?' });
+  assert.match(await sent.text(), /"done":true/);
+  assert.match(prompt.messages[0].content, /"World"\.[\s\S]*Describe the terrain as World/);
+  assert.match(prompt.messages.at(-1).content, /arrived in World/);
+
+  const v3 = await get('/api/cards?version=3&id=' + nicknamed.id);
+  const v2 = await get('/api/cards?version=2&id=' + nicknamed.id);
+  assert.equal(v3.data.name, nicknameFields.name);
+  assert.equal(v3.data.nickname, 'World');
+  assert.equal(v2.data.extensions.nitanor.nickname, 'World');
+  const previewCard = await fetch(base + '/api/cards?action=preview-file', { method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' }, body: JSON.stringify(v2) });
+  assert.equal(previewCard.status, 200);
+  const imported = await post('/api/cards?action=import', { token: (await previewCard.json()).token, tags: [] });
+  assert.equal(imported.status, 200);
+  assert.ok((await imported.json()).characters.some(item => item.id !== nicknamed.id && item.nickname === 'World'));
+
+  await library('save-character', { ...nicknameFields, id: nicknamed.id, nickname: '' });
+  assert.equal((await get(nickUrl)).chat.title, nicknameFields.name);
+  assert.equal((await get(namedUrl)).chat.title, 'A new campaign');
+  assert.equal((await get(namedUrl)).chat.character, nicknameFields.name);
+
   await library('rename-chat', { id: chat, title: 'Signal' });
   assert.equal((await post('/api/library', { action: 'delete-chat', id: chat }, { Origin: 'https://example.com' })).status, 403);
   await stop();
@@ -330,7 +368,7 @@ try {
   const newCookie = login.headers.get('set-cookie').split(';')[0];
   assert.deepEqual(await get('/api/onboarding', { Cookie: newCookie }), { stage: 'ready' });
   assert.equal((await get('/api/library', { Cookie: newCookie })).defaultPersonaId, account.personaId);
-  console.log('Production smoke passed: avatar setup, persona defaults, character editor data and rollback, lorebook activation and images, manual and automatic memory, recovery, guarded routes, sign-in, restart, chat and streaming.');
+  console.log('Production smoke passed: avatar setup, persona defaults, character editor data, chat names and card transfer, lorebook activation and images, manual and automatic memory, recovery, guarded routes, sign-in, restart, chat and streaming.');
 } finally {
   await stop();
   provider.closeAllConnections();

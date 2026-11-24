@@ -6,6 +6,10 @@ export function expandNames(text: string, character: string, player: string) {
   return text.replace(/\{\{?\s*(user|char)\s*\}\}/gi, (_, name: string) => name.toLowerCase() === "user" ? player : character);
 }
 
+export function chatNameInstruction(cardName: string, chatName: string) {
+  return cardName === chatName ? "" : "The character’s name in this chat is " + JSON.stringify(chatName) + ".";
+}
+
 type Part = { reasoning: boolean; text: string };
 
 export function thinkingSplitter(formats: ThinkingFormats) {

@@ -4,6 +4,7 @@ import type { GenerationNumber } from "./generation";
 export type Character = {
   id: string;
   name: string;
+  nickname?: string;
   description: string;
   instructions: string;
   greeting: string;

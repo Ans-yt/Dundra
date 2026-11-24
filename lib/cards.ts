@@ -149,6 +149,8 @@ export function normalizeCard(value: unknown, source = ""): CardDraft {
   if (Array.isArray(extensions.regex_scripts) && JSON.stringify(extensions.regex_scripts).length<=500000) original.regex_scripts=extensions.regex_scripts;
   original.extensions = extensions;
   const own = object(extensions.nitanor);
+  const nickname = string(card.nickname ?? own.nickname).slice(0, 80);
+  if (nickname) original.extras.nickname = nickname;
   const instructions = string(own.instructions) || string(card.instructions) || cardInstructions(original) || "Play the character named " + name + ".";
   const greeting = string(card.first_mes ?? card.greeting);
   if (instructions.length > TEXT_LIMIT || greeting.length > GREETING_LIMIT) {
@@ -156,7 +158,7 @@ export function normalizeCard(value: unknown, source = ""): CardDraft {
   }
   const tags = cardTags(card.tags);
   return {
-    character: { id: crypto.randomUUID(), name,
+    character: { id: crypto.randomUUID(), name, nickname,
       description: (string(own.description) || original.creator_notes || original.description || "").slice(0, 600),
       creator: string(card.creator).slice(0, 100), source, greeting, instructions,
       alternateGreetings: alternateGreetings(card.alternate_greetings ?? card.alternateGreetings), tags: "" },
@@ -173,6 +175,7 @@ export function exportCard(character: Character, original: CardFields, version: 
       ...(version === 3 && { group_only_greetings: [], ...extras }),
       ...fields,
       name: character.name,
+      ...(version === 3 && { nickname: character.nickname || "" }),
       description: edited ? character.instructions : original.description || "",
       personality: edited ? "" : original.personality || "",
       scenario: edited ? "" : original.scenario || "",
@@ -185,7 +188,7 @@ export function exportCard(character: Character, original: CardFields, version: 
       creator: character.creator || "",
       character_version: original.character_version || "",
       tags: cardTags(character.tags),
-      extensions: { ...extensions, ...(regex_scripts && {regex_scripts:regex_scripts}), nitanor: { description: character.description, instructions: character.instructions } },
+      extensions: { ...extensions, ...(regex_scripts && {regex_scripts:regex_scripts}), nitanor: { description: character.description, instructions: character.instructions, nickname: character.nickname || "" } },
     },
   };
 }

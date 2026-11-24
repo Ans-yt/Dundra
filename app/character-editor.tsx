@@ -158,6 +158,8 @@ export function CharacterEditor({ item, player, pending, error, save }: {
   item?: Character; player: string; pending: boolean; error: Problem | null; save: (fields: object) => void;
 }) {
   const [name, setName] = useState(item?.name ?? "");
+  const [nickname, setNickname] = useState(item?.nickname ?? "");
+  const nicknameHelp = useId();
   const [description, setDescription] = useState(item?.description ?? "");
   const [tags, setTags] = useState(item?.tags ?? "");
   const [portrait, setPortrait] = useState<string | null>();
@@ -200,9 +202,13 @@ export function CharacterEditor({ item, player, pending, error, save }: {
     </aside>
     <fieldset className="form character-details" disabled={pending}>
       <label>Name<input name="name" required maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label>
+      <label><span id={nicknameHelp + "-label"}>Chat name</span><input name="nickname" maxLength={80} value={nickname} placeholder="e.g. World"
+        aria-labelledby={nicknameHelp + "-label"} aria-describedby={nicknameHelp} onChange={event => setNickname(event.target.value)} />
+        <small id={nicknameHelp} className="character-name-help">Optional nickname used in chats and in the model’s prompt.</small>
+      </label>
       <label>Description<textarea name="description" maxLength={600} rows={3} value={description} onChange={event => setDescription(event.target.value)} /></label>
       <label>Character instructions<textarea name="instructions" required maxLength={80000} rows={5} defaultValue={item?.instructions} /></label>
-      <Openings initial={[item?.greeting ?? "", ...(item?.alternateGreetings ?? [])]} character={name} player={player} />
+      <Openings initial={[item?.greeting ?? "", ...(item?.alternateGreetings ?? [])]} character={nickname.trim() || name} player={player} />
       <label>Tags<input name="tags" maxLength={5000} placeholder="Mystery, Fantasy" value={tags} onChange={event => setTags(event.target.value)} /></label>
       <CharacterLorebooks owner={item?.id} selected={lorebookIds} change={setLorebookIds} />
       {error && <AppAlert {...error} />}

@@ -91,6 +91,7 @@ export async function POST(request: Request) {
         const item = {
           id: id || crypto.randomUUID(),
           name: field(body, "name", 80, true),
+          nickname: body.nickname === undefined ? undefined : field(body, "nickname", 80),
           description: field(body, "description", 600),
           instructions: field(body, "instructions", TEXT_LIMIT, true),
           greeting: field(body, "greeting", GREETING_LIMIT),

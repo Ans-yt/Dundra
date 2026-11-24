@@ -508,6 +508,7 @@ textarea { resize: vertical; }
   align-items: start;
 }
 .character-details { grid-column: 1; grid-row: 1; min-width: 0; }
+.character-name-help { color: var(--muted); font-weight: 400; }
 .character-preview { position: sticky; top: 88px; display: grid; grid-column: 2; gap: 10px; min-width: 0; }
 .character-preview > h2 { font-size: 1.2rem; }
 .character-preview .card-name { font: 1.25rem/1.25 Georgia, serif; }

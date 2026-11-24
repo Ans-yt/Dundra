@@ -11,7 +11,7 @@ import { generate } from "../../../lib/provider";
 import { after } from "next/server";
 import { summarizeChat } from "../../../lib/summarize-chat";
 import { buildPrompt, withPrefill } from "../../../lib/chat-prompt";
-import { chatHistoryText, expandNames, personaText, stripAssistantThoughts, thinkingSplitter } from "../../../lib/chat-text";
+import { chatHistoryText, chatNameInstruction, expandNames, personaText, stripAssistantThoughts, thinkingSplitter } from "../../../lib/chat-text";
 import { effectivePrompt } from "../../../lib/generation";
 
 export const runtime = "nodejs";
@@ -27,6 +27,8 @@ export async function POST(request: Request) {
     if (!connection.model) throw new RequestError("Choose a model in Settings before sending a message.");
     const item = character(current.chat.character_id);
     if (!item) throw new RequestError("Character not found.", 404);
+    const chatName = current.chat.character;
+    const identity = chatNameInstruction(item.name, chatName);
     const player = current.chat.persona_id ? persona(current.chat.persona_id) : undefined;
     const mode = body.mode ?? (body.regenerate === true ? "alternate" : "send");
     if (mode !== "send" && mode !== "alternate" && mode !== "continue" && mode !== "impersonate") throw new RequestError("Unknown reply action.");
@@ -43,7 +45,7 @@ export async function POST(request: Request) {
       const head=media.slice(0,media.indexOf(","));
       if (mode!=="send" || !attachmentKinds(cfg.enabled && cfg.audio,cfg.enabled && cfg.video).some(t=>head==="data:"+t+";base64") || media.length>11_185_000 || !/^[A-Za-z0-9+/]+=*$/.test(media.slice(head.length+1))) throw new RequestError("Unsupported attachment or file over 8 MiB.");
     }
-    const rule = (s:string,p:number,stage:"save"|"prompt",depth=0) => applyRules(cfg,s,p,stage,depth,player?.name || "you",item.name);
+    const rule = (s:string,p:number,stage:"save"|"prompt",depth=0) => applyRules(cfg,s,p,stage,depth,player?.name || "you",chatName);
     const action: ReplyAction | undefined = mode === "impersonate" ? undefined : mode === "send" ? { mode, media, input: rule(field(body, "message", 8_000, !media),1,"save") } : { mode, messageId: target.id };
     const generation = generationConfig();
     const options = chatOptions(id);
@@ -51,7 +53,7 @@ export async function POST(request: Request) {
       throw new RequestError("Add a message or enable Send inline media in Bonus settings.");
     }
     const saved = { ...generation.current, ...(preset && presetSettings(preset)), ...options.generation };
-    const expand = (text: string) => expandNames(text, item.name, player?.name || "you");
+    const expand = (text: string) => expandNames(text, chatName, player?.name || "you");
     const settings = { ...saved, globalPrompt: expand(effectivePrompt(generation, connection.promptId)), prefill: mode === "continue" || mode === "impersonate" ? "" : expand(saved.prefill) };
     const exampleSection = card.mes_example && "Example dialogue:\n" + card.mes_example;
     const hasEmbeddedExamples = Boolean(exampleSection && item.instructions.includes(exampleSection));
@@ -60,7 +62,7 @@ export async function POST(request: Request) {
     const system = [expand(instructions), player && "Player persona: " + personaText({ name: player.name, description: expand(player.description) }),
       summary && "Chat summary:\n" + expand(summary)].filter(Boolean).join("\n\n");
     const history = (mode === "send" || mode === "impersonate" ? current.messages : current.messages.slice(0, targetIndex + Number(mode === "continue")))
-      .map((message,i,list) => ({ ...message, content: rule(chatHistoryText(message, options.formats, item.name, player?.name || "you"),message.role==="user"?1:2,"prompt",list.length-i-1) }));
+      .map((message,i,list) => ({ ...message, content: rule(chatHistoryText(message, options.formats, chatName, player?.name || "you"),message.role==="user"?1:2,"prompt",list.length-i-1) }));
     const continuePrompt = options.actionPrompts.continue || (typeof preset?.continue_nudge_prompt === "string" && preset.continue_nudge_prompt) || "**continue this scene.**";
     const input = action?.mode === "send" ? rule(expand(action.input),1,"prompt") : mode === "impersonate" ? (history.length ? null : "") : mode === "continue" && options.bonus.continuePrefill ? null : mode === "continue" ? expand(continuePrompt)
       : history.at(-1)?.role === "user" ? null : "Begin the scene with an opening message.";
@@ -69,7 +71,7 @@ export async function POST(request: Request) {
     const scan = mode === "send" ? [...history, { content: input || "" }] : history;
     const embeddedBooks = ordered ? withEmbeddedLore(card.character_book, []) : [];
     const timed = [...linkedBooks, ...embeddedBooks].some(book => book.entries.some(entry => entry.sticky || entry.cooldown));
-    const context = { character: item.name, characterId: item.id, tags: item.tags.split(","), seed: id, messageCount: scan.length,
+    const context = { character: item.name, nickname: chatName, characterId: item.id, tags: item.tags.split(","), seed: id, messageCount: scan.length,
       previous: timed ? loreTiming(id, mode === "send" || mode === "impersonate" ? undefined : target.id + Number(mode === "continue")) : undefined, trigger: mode === "send" ? "normal" : mode === "alternate" ? "swipe" : mode };
     const lore = activeLore(linkedBooks, scan, context);
     const embedded = embeddedBooks.length ? activeLore(embeddedBooks, scan, context) : undefined;
@@ -96,7 +98,7 @@ export async function POST(request: Request) {
     const impersonation = mode === "impersonate" ? expand(options.actionPrompts.impersonate || (typeof preset?.impersonation_prompt === "string" && preset.impersonation_prompt) || "Write only the next message as {{user}}, in their voice. Leave {{char}}’s response to the next turn.") : "";
     const profilePrompt = ordered && connection.promptId && generation.prompts.some(item => item.id === connection.promptId) ? settings.globalPrompt : "";
     const continuePrefillPrompt = mode === "continue" && options.bonus.continuePrefill ? expand(options.actionPrompts.continue) : "";
-    const reserved = [impersonation, profilePrompt, continuePrefillPrompt, imageNotes].reduce((sum, text) => text ? sum + 4 + Math.ceil(Buffer.byteLength(text) / 4) : sum, 0);
+    const reserved = [impersonation, profilePrompt, continuePrefillPrompt, imageNotes, identity].reduce((sum, text) => text ? sum + 4 + Math.ceil(Buffer.byteLength(text) / 4) : sum, 0);
     const presetSettingsBudget = { ...settings, contextSize: settings.contextSize - reserved };
     const historySettings = { ...presetSettingsBudget, contextSize: presetSettingsBudget.contextSize - depthEntries.reduce((sum, entry) => sum + 4 + Math.ceil(Buffer.byteLength(entry.content) / 4), 0) };
     let prompt = buildPrompt(systemWithLore, history, input,
@@ -108,6 +110,10 @@ export async function POST(request: Request) {
     }
     if (ordered && preset) prompt=arrangePreset(preset,prompt,presetSettingsBudget,card,instructions,player?.description || "",summary,expand,mode,formatLore,options.bonus.examples,lore,embedded,depthEntries);
     if (profilePrompt) prompt.unshift({ role: "system", content: profilePrompt });
+    if (identity) {
+      if (prompt[0]?.role === "system") prompt[0].content = identity + "\n\n" + prompt[0].content;
+      else prompt.unshift({ role: "system", content: identity });
+    }
     if (mode === "continue" && options.bonus.continuePrefill) {
       const tail = history.at(-1)!;
       const index = prompt.findLastIndex(message => message.role === "assistant" && message.content === tail.content);
@@ -185,7 +191,7 @@ export async function POST(request: Request) {
             else samplers.seed = options.bonus.seed;
           }
           const raw = generate(prompt, signal, connection, settings, thinkingLevel, options.formats.reasoning ? receiveReasoning : undefined,
-            samplers, { settings: options.bonus, character: item.name, player: player?.name || "You" });
+            samplers, { settings: options.bonus, character: chatName, player: player?.name || "You" });
           const splitter = thinkingSplitter(options.formats);
           async function* visible() {
             for await (const chunk of raw) for (const part of splitter.split(chunk)) {
