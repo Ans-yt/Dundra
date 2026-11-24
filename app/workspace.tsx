@@ -148,7 +148,7 @@ function InlinePersona({ item, disabled, save }: { item: Persona; disabled: bool
           <label>Name<input name="name" required maxLength={80} defaultValue={item.name} disabled={disabled} /></label>
         </div>
         <label>Description<textarea name="description" rows={3} maxLength={4000} defaultValue={item.description} disabled={disabled} /></label>
-        <LoreLinks scope="persona" id={item.id} />
+        <LoreLinks scope="persona" id={item.id} disabled={disabled} />
         <button className="primary" disabled={disabled}>Save persona</button>
       </form>
     </div>

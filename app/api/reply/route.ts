@@ -73,6 +73,20 @@ export async function POST(request: Request) {
       previous: timed ? loreTiming(id, mode === "send" || mode === "impersonate" ? undefined : target.id + Number(mode === "continue")) : undefined, trigger: mode === "send" ? "normal" : mode === "alternate" ? "swipe" : mode };
     const lore = activeLore(linkedBooks, scan, context);
     const embedded = embeddedBooks.length ? activeLore(embeddedBooks, scan, context) : undefined;
+    const images = new Set<string>();
+    let availableImageBytes = Math.ceil(8 * 1024 * 1024 / 3) * 4;
+    const imageLabels: string[] = [];
+    if (options.bonus.inlineMedia) for (const entry of lore.visualEntries) {
+      const first = images.size + 1;
+      for (const image of entry.images) {
+        if (!images.has(image) && image.length <= availableImageBytes) {
+          images.add(image);
+          availableImageBytes -= image.length;
+        }
+      }
+      if (images.size >= first) imageLabels.push(`${first === images.size ? first : first + "–" + images.size}. ${entry.name}`);
+    }
+    const imageNotes = imageLabels.length ? "Lorebook visual references in order:\n" + imageLabels.join("\n") : "";
     const starts = Object.fromEntries([...lore.activations, ...(embedded?.activations ?? [])].map(key => [key, scan.length]));
     const formatLore = (text: string) => rule(rule(text, 5, "save"), 5, "prompt");
     const systemWithLore = ordered ? "" : [...lore.before_char.map(text => formatLore(expand(text))), system,
@@ -82,7 +96,7 @@ export async function POST(request: Request) {
     const impersonation = mode === "impersonate" ? expand(options.actionPrompts.impersonate || (typeof preset?.impersonation_prompt === "string" && preset.impersonation_prompt) || "Write only the next message as {{user}}, in their voice. Leave {{char}}’s response to the next turn.") : "";
     const profilePrompt = ordered && connection.promptId && generation.prompts.some(item => item.id === connection.promptId) ? settings.globalPrompt : "";
     const continuePrefillPrompt = mode === "continue" && options.bonus.continuePrefill ? expand(options.actionPrompts.continue) : "";
-    const reserved = [impersonation, profilePrompt, continuePrefillPrompt].reduce((sum, text) => text ? sum + 4 + Math.ceil(Buffer.byteLength(text) / 4) : sum, 0);
+    const reserved = [impersonation, profilePrompt, continuePrefillPrompt, imageNotes].reduce((sum, text) => text ? sum + 4 + Math.ceil(Buffer.byteLength(text) / 4) : sum, 0);
     const presetSettingsBudget = { ...settings, contextSize: settings.contextSize - reserved };
     const historySettings = { ...presetSettingsBudget, contextSize: presetSettingsBudget.contextSize - depthEntries.reduce((sum, entry) => sum + 4 + Math.ceil(Buffer.byteLength(entry.content) / 4), 0) };
     let prompt = buildPrompt(systemWithLore, history, input,
@@ -104,6 +118,17 @@ export async function POST(request: Request) {
     prompt = prompt.map(message => message.role === "assistant"
       ? { ...message, content: stripAssistantThoughts(message.content, options.formats) } : message)
       .filter(message => message.role !== "assistant" || message.content.trim());
+    if (imageNotes) {
+      const user = prompt.findLast(message => message.role === "user" && !message.example);
+      if (user) {
+        const media = typeof user.media === "string" ? [user.media] : user.media ?? [];
+        user.content = [user.content, imageNotes].filter(Boolean).join("\n\n");
+        user.media = [...images, ...media];
+      } else {
+        const tail = prompt.at(-1)?.role === "assistant" ? prompt.length - 1 : prompt.length;
+        prompt.splice(tail, 0, { role: "user", content: imageNotes, media: [...images] });
+      }
+    }
     if (impersonation) prompt.push({ role: "system", content: impersonation });
     const abort = new AbortController();
     const signal = AbortSignal.any([request.signal, abort.signal]);

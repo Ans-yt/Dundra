@@ -16,7 +16,7 @@ npm run build
 npm start
 ```
 
-Open [Dundra](http://127.0.0.1:3000/). Dundra runs on your own machine and is intended for one local user. The first-run walkthrough helps you choose a default persona. You can also set a local account password to protect access in the browser, or skip that step. Change your default persona later under **Personas**.
+Open [Dundra](http://127.0.0.1:3000/). Dundra runs on your own machine and is intended for one local user. The first-run walkthrough helps you choose a default persona. You can also set a local account password, or skip that step. Each browser stays signed in while the server is running and asks again after a restart. Change your default persona later under **Personas**.
 
 On Windows, double-click **Start.cmd** to launch the installed copy, or **Update & Start.cmd** to pull updates from the configured Git upstream first. The updater skips Git if the folder came from a ZIP, the branch has no upstream, or you have local changes.
 
@@ -29,6 +29,7 @@ In **Settings → Model**, enter your OpenAI-compatible provider’s base URL, t
 - A searchable character library, personas, and character-card import and export as JSON or PNG.
 - Streaming chat with swipes, continue, impersonation drafts, and SillyTavern JSONL import and export.
 - Lorebooks, prompt presets, regex scripts, HTML message formatting, and optional automatic chat summaries and Lorebook memory.
+- Experimental lorebook images can send up to three images from a matching entry when inline media is enabled.
 - Local storage in `data/`. API keys and chat history live there. Requests send the relevant chat context and supported attachments to the provider you configure.
 
 ## Checks

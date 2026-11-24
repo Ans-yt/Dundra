@@ -5,14 +5,32 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
+import sharp from 'sharp';
 const data = await mkdtemp(join(tmpdir(), 'dundra-smoke-'));
 let mode = 'normal';
 let prompt;
+let memoryPrompt;
+let rejectSummary = false;
 const provider = createServer(async (req, res) => {
   assert.equal(req.url, '/v1/chat/completions');
   let body = '';
   for await (const chunk of req) body += chunk;
-  prompt = JSON.parse(body);
+  const payload = JSON.parse(body);
+  const instruction = payload.messages[0]?.content;
+  if (typeof instruction === 'string' && /updated (cumulative )?summary/.test(instruction)) {
+    memoryPrompt = payload;
+    if (rejectSummary) { res.writeHead(429).end(); return; }
+    const content = instruction.includes('JSON object') ? JSON.stringify({
+      summary: 'Quinn opened the harbor with the silver key.',
+      title: 'The silver key',
+      memory: 'The silver key opens the reef gate at dawn.',
+      keys: 'reef gate, silver key',
+    }) : 'Quinn opened the harbor with the silver key.';
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end('data: ' + JSON.stringify({ choices: [{ delta: { content }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n');
+    return;
+  }
+  prompt = payload;
   res.writeHead(200, { 'Content-Type': 'text/event-stream' });
   res.write('data: {"choices":[{"delta":{"content":"Signal "}}]}\n\n');
   setTimeout(() => {
@@ -67,12 +85,18 @@ try {
   assert.deepEqual([empty.characters, empty.personas, empty.chats, empty.model], [[], [], [], 'test-model']);
   assert.deepEqual((await get('/api/lorebooks')).books, []);
   assert.deepEqual(await get('/api/onboarding'), { stage: 'setup', personas: [] });
-  const guest = await post('/api/onboarding', { action: 'finish', personaName: 'Quinn', personaDescription: 'A sailor.' });
+  const pixels = await Promise.all(['#ff0080', '#0080ff', '#00ff80'].map(color =>
+    sharp({ create: { width: 2, height: 2, channels: 3, background: color } }).png().toBuffer()));
+  const images = pixels.map(bytes => 'data:image/png;base64,' + bytes.toString('base64'));
+  const guest = await post('/api/onboarding', { action: 'finish', personaName: 'Quinn', personaDescription: 'A sailor.', personaPortrait: images[0] });
   assert.equal(guest.status, 200);
   assert.equal(guest.headers.get('set-cookie'), null);
-  assert.deepEqual(await guest.json(), { stage: 'ready', accountName: null });
+  assert.deepEqual(await guest.json(), { stage: 'ready' });
   const configured = await get('/api/library');
   assert.equal(configured.defaultPersonaId, configured.personas[0].id);
+  const portrait = await fetch(base + '/api/media?kind=persona&id=' + configured.defaultPersonaId);
+  assert.equal(portrait.status, 200);
+  assert.deepEqual(Buffer.from(await portrait.arrayBuffer()), pixels[0]);
   assert.equal((await post('/api/onboarding', { action: 'finish', personaName: 'Duplicate' })).status, 409);
   const { characters } = await library('save-character', {
     name: 'Harbor keeper', instructions: 'Roleplay as {{char}}.', greeting: 'Welcome, {{user}}.', tags: 'Mystery',
@@ -100,6 +124,116 @@ try {
   assert.equal(replaced.length, saved.length);
   assert.equal(replaced.at(-1).id, saved.at(-1).id);
   assert.equal(replaced.at(-1).variantCount, 2);
+  const lore = {
+    name: 'Harbor guide', scan_depth: 1, image_attachments: true,
+    entries: [{ id: 'beacon', name: 'Harbor beacon', keys: ['beacon'], content: '', images }],
+  };
+  const tooMany = { ...lore, entries: [{ ...lore.entries[0], images: [...images, images[0]] }] };
+  assert.equal((await post('/api/lorebooks', { action: 'save', book: tooMany })).status, 400);
+  const createdBook = await post('/api/lorebooks', { action: 'save', book: lore });
+  assert.equal(createdBook.status, 200);
+  const savedBook = await createdBook.json();
+  const link = await post('/api/lorebooks', { action: 'link', scope: 'chat', owner: withoutPersona.id, id: savedBook.id, enabled: true });
+  assert.equal(link.status, 200);
+  const postedImages = () => prompt.messages.flatMap(message =>
+    Array.isArray(message.content) ? message.content.filter(part => part.type === 'image_url').map(part => part.image_url.url) : []);
+  const say = async message => {
+    const generated = await post('/api/reply', { chat: withoutPersona.id, message });
+    assert.match(await generated.text(), /"done":true/);
+  };
+  await say('What is ahead?');
+  assert.deepEqual(postedImages(), []);
+  await say('I see the beacon.');
+  assert.deepEqual(postedImages(), images);
+  assert.match(JSON.stringify(prompt.messages), /Harbor beacon/);
+  const prefs = (await get('/api/library?chat=' + withoutPersona.id)).preferences;
+  await library('chat-options', { id: withoutPersona.id, bonus: { ...prefs.options.bonus, inlineMedia: false } });
+  await say('I am near the beacon.');
+  assert.deepEqual(postedImages(), []);
+  await library('chat-options', { id: withoutPersona.id, bonus: prefs.options.bonus });
+  const disabledBook = await post('/api/lorebooks', { action: 'save', id: savedBook.id, book: { ...savedBook, image_attachments: false } });
+  assert.equal(disabledBook.status, 200);
+  assert.deepEqual((await get('/api/lorebooks?book=' + savedBook.id)).entries[0].images, images);
+  await say('At the beacon.');
+  assert.deepEqual(postedImages(), []);
+
+  const personaId = configured.defaultPersonaId;
+  const createLore = async (name, entries, options = {}) => {
+    const response = await post('/api/lorebooks', { action: 'save', book: { name, entries, scan_depth: 1, ...options } });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const linkLore = async (scope, owner, id) => {
+    assert.equal((await post('/api/lorebooks', { action: 'link', scope, owner, id, enabled: true })).status, 200);
+  };
+  const characterLore = await createLore('Harbor rules', [
+    { id: 'primary', keys: ['/obsidian/i'], secondary_keys: ['inspection'], selective: true, content: 'Character fact: luminous keystone.' },
+    { id: 'recursive', keys: ['luminous keystone'], delayUntilRecursion: 1, content: 'A recursive signal: seven pennants.' },
+    { id: 'never', keys: ['obsidian'], probability: 0, content: 'Unexpected probability match.' },
+    { id: 'budget', keys: ['obsidian'], content: 'Excessive budget use. '.repeat(100) },
+  ], { token_budget: 55 });
+  const personaLore = await createLore('Navigator notes', [{ id: 'private', keys: ['obsidian'], content: 'Persona fact: a copper feather.' }]);
+  await linkLore('character', character.id, characterLore.id);
+  await linkLore('persona', personaId, personaLore.id);
+  await library('chat-persona', { id: withoutPersona.id, personaId });
+  const loreLinks = await get('/api/lorebooks?scope=chat&owner=' + withoutPersona.id);
+  assert.deepEqual(new Set(loreLinks.inherited), new Set([characterLore.id, personaLore.id]));
+  assert.deepEqual(loreLinks.direct, [savedBook.id]);
+  await say('An obsidian stone.');
+  assert.doesNotMatch(JSON.stringify(prompt.messages), /luminous keystone|seven pennants|Unexpected probability|Excessive budget/);
+  await say('OBSIDIAN inspection.');
+  assert.match(JSON.stringify(prompt.messages), /luminous keystone/);
+  assert.match(JSON.stringify(prompt.messages), /seven pennants/);
+  assert.match(JSON.stringify(prompt.messages), /copper feather/);
+  assert.doesNotMatch(JSON.stringify(prompt.messages), /Unexpected probability|Excessive budget/);
+
+  const statusPath = '/api/library?memory=' + withoutPersona.id;
+  async function waitForMemory() {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const status = await get(statusPath);
+      if (!status.running) return status;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error('The memory job did not finish');
+  }
+  const memorySettings = prefs.options.autoMemory;
+  assert.equal(memorySettings.enabled, false);
+  await library('chat-options', { id: withoutPersona.id, autoMemory: { ...memorySettings, model: 'fixture-summary' } });
+  await library('summarize-chat', { id: withoutPersona.id });
+  const manual = await waitForMemory();
+  assert.match(manual.summary, /silver key/);
+  assert.equal(manual.bookId, null);
+  assert.equal(memoryPrompt.model, 'fixture-summary');
+  assert.equal((await post('/api/library', { action: 'summarize-chat', id: withoutPersona.id })).status, 409);
+
+  await library('chat-options', { id: withoutPersona.id, autoMemory: { ...memorySettings, every: 2, enabled: true, book: true } });
+  rejectSummary = true;
+  await say('I open the silver box.');
+  const throttled = await waitForMemory();
+  assert.match(throttled.error, /rate-limiting/);
+  assert.equal(throttled.summary, manual.summary);
+  assert.equal(throttled.bookId, null);
+  rejectSummary = false;
+  await library('summarize-chat', { id: withoutPersona.id });
+  const recalled = await waitForMemory();
+  assert.equal(recalled.error, '');
+  assert.ok(recalled.bookId);
+  assert.match(JSON.stringify(memoryPrompt.messages), /Previous summary[\s\S]*open the silver box/i);
+  const memoryBook = await get('/api/lorebooks?book=' + recalled.bookId);
+  assert.deepEqual(memoryBook.entries[0].keys, ['reef gate', 'silver key']);
+  assert.ok((await get('/api/lorebooks?scope=chat&owner=' + withoutPersona.id)).inherited.includes(memoryBook.id));
+  assert.ok(!(await get('/api/lorebooks?scope=chat&owner=' + chat)).books.some(book => book.id === memoryBook.id));
+  assert.ok(!(await get('/api/lorebooks')).books.some(book => book.id === memoryBook.id));
+  await library('chat-options', { id: withoutPersona.id, autoMemory: { ...memorySettings, book: true } });
+  await say('At the reef gate.');
+  assert.match(JSON.stringify(prompt.messages), /opens the reef gate at dawn/);
+  await library('chat-options', { id: withoutPersona.id, autoMemory: memorySettings });
+  await say('At the reef gate again.');
+  assert.doesNotMatch(JSON.stringify(prompt.messages), /opens the reef gate at dawn/);
+  assert.equal((await get(statusPath)).bookId, memoryBook.id);
+  await library('delete-chat', { id: withoutPersona.id });
+  assert.equal((await fetch(base + '/api/lorebooks?book=' + memoryBook.id)).status, 404);
+
   await library('rename-chat', { id: chat, title: 'Signal' });
   assert.equal((await post('/api/library', { action: 'delete-chat', id: chat }, { Origin: 'https://example.com' })).status, 403);
   await stop();
@@ -108,7 +242,7 @@ try {
   assert.deepEqual((await get(url)).messages, replaced);
   await library('delete-chat', { id: chat });
   assert.equal((await fetch(base + url)).status, 404);
-  assert.deepEqual(await get('/api/onboarding'), { stage: 'ready', accountName: null });
+  assert.deepEqual(await get('/api/onboarding'), { stage: 'ready' });
 
   await stop();
   const securedData = join(data, 'secured');
@@ -123,26 +257,26 @@ try {
   const setCookie = created.headers.get('set-cookie');
   assert.match(setCookie, /HttpOnly/);
   assert.match(setCookie, /SameSite=Strict/);
-  let cookie = setCookie.split(';')[0];
-  assert.deepEqual(await created.json(), { stage: 'ready', accountName: account.accountName });
+  const cookie = setCookie.split(';')[0];
+  assert.deepEqual(await created.json(), { stage: 'ready' });
   assert.deepEqual(await get('/api/onboarding'), { stage: 'locked' });
   assert.equal((await get('/api/library', { Cookie: cookie })).personas.length, 1);
   for (const path of ['library', 'generation', 'settings', 'advanced', 'lorebooks', 'media', 'cards']) {
     assert.equal((await fetch(base + '/api/' + path)).status, 401, path);
   }
   assert.equal((await post('/api/reply', {})).status, 401);
-  const lock = await post('/api/onboarding', { action: 'logout' }, { Cookie: cookie });
-  assert.match(lock.headers.get('set-cookie'), /Max-Age=0/);
+  assert.deepEqual(await get('/api/onboarding', { Cookie: cookie }), { stage: 'ready' });
+  await stop();
+  await start(securedData);
+  assert.deepEqual(await get('/api/onboarding', { Cookie: cookie }), { stage: 'locked' });
   assert.equal((await fetch(base + '/api/library', { headers: { Cookie: cookie } })).status, 401);
   assert.equal((await post('/api/onboarding', { action: 'login', name: account.accountName, password: 'wrong' })).status, 401);
   const login = await post('/api/onboarding', { action: 'login', name: account.accountName, password: account.password });
   assert.equal(login.status, 200);
-  cookie = login.headers.get('set-cookie').split(';')[0];
-  await stop();
-  await start(securedData);
-  assert.equal((await get('/api/onboarding', { Cookie: cookie })).stage, 'ready');
-  assert.equal((await get('/api/library', { Cookie: cookie })).defaultPersonaId, account.personaId);
-  console.log('Production smoke passed: first-run setup, skipped account, default persona, local account, guarded routes, sign-in, lock, restart, chat and streaming.');
+  const newCookie = login.headers.get('set-cookie').split(';')[0];
+  assert.deepEqual(await get('/api/onboarding', { Cookie: newCookie }), { stage: 'ready' });
+  assert.equal((await get('/api/library', { Cookie: newCookie })).defaultPersonaId, account.personaId);
+  console.log('Production smoke passed: avatar setup, persona defaults, lorebook activation and images, manual and automatic memory, recovery, guarded routes, sign-in, restart, chat and streaming.');
 } finally {
   await stop();
   provider.closeAllConnections();

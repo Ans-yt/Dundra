@@ -39,6 +39,7 @@ type ChatWorkspaceProps = {
   onModelsChanged: (model: string | null) => Promise<boolean>;
   onThinking: (level: string) => void;
   onSettings: (changes: ChatSettingsChange) => Promise<boolean>;
+  onSummarize: () => Promise<boolean>;
   onEdit: (id: number, content: string) => Promise<boolean>;
   onVariant: (id: number, variant: number) => void;
   onFork: (id: number) => void;
@@ -48,7 +49,7 @@ type ChatWorkspaceProps = {
 };
 
 export function ChatWorkspace({ session, advanced, personas, draft, preview, locked, error, onBack, onImport, onRename, onDelete, onDeleteFrom,
-  onPersona, onSavePersona, onModelsChanged, onThinking, onSettings, onEdit, onVariant, onFork, onDraft, onReply, onStop }: ChatWorkspaceProps) {
+  onPersona, onSavePersona, onModelsChanged, onThinking, onSettings, onSummarize, onEdit, onVariant, onFork, onDraft, onReply, onStop }: ChatWorkspaceProps) {
   const { chat, messages, preferences } = session;
   const { provider } = preferences;
   const [panelOpen, setPanelOpen] = useState(false);
@@ -185,7 +186,7 @@ export function ChatWorkspace({ session, advanced, personas, draft, preview, loc
           {subtitle && <p>{subtitle}</p>}
         </div>
         <div className="chat-provider">
-          <LoreLinks scope="chat" id={chat.id} contextKey={chat.persona_id} disabled={locked} />
+          <LoreLinks scope="chat" id={chat.id} contextKey={JSON.stringify([chat.persona_id, preferences.options.autoMemory.book, preferences.memoryStatus.bookId])} disabled={locked} />
           {provider.model && <span className="chat-provider-name" title={provider.name + " · " + provider.model}><Cpu size={14} aria-hidden="true" /><span>{provider.name}</span></span>}
           <details className="chat-provider-menu" ref={menu} onToggle={(event) => {
             setPanelOpen(event.currentTarget.open);
@@ -197,7 +198,7 @@ export function ChatWorkspace({ session, advanced, personas, draft, preview, loc
           }}>
             <summary className="quiet" aria-label="Chat settings" title="Chat settings"><Settings2 size={20} aria-hidden="true" /></summary>
             {panelOpen && <ChatSettings preferences={preferences} advanced={advanced} chatId={chat.id} locked={locked} error={error} onClose={closeSettings}
-              onModelsChanged={onModelsChanged} onSave={onSettings} onPreview={setVisual} width={drawerWidth} onWidth={setDrawerWidth} />}
+              onModelsChanged={onModelsChanged} onSave={onSettings} onSummarize={onSummarize} onPreview={setVisual} width={drawerWidth} onWidth={setDrawerWidth} />}
           </details>
           <span className="chat-total-count"><span>Total </span><TokenCount value={totalTokens} label="Total" title="Estimated total for the active prompt or preset, persona, chat history, and saved summary" /></span>
         </div>

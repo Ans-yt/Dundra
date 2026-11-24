@@ -1,7 +1,8 @@
 import type { SetupStatus } from "../../../lib/onboarding";
+import { readImage } from "../../../lib/media";
 import { failure, field, fields, localRequest, RequestError } from "../../../lib/http";
 import { completeWorkspaceSetup, setupPersonas, workspaceSetup } from "../../../lib/store";
-import { makeWorkspacePassword, newWorkspaceSession, sessionCookie, signIn, signOut, unlocked } from "../../../lib/access";
+import { makeWorkspacePassword, newWorkspaceSession, sessionCookie, signIn, unlocked } from "../../../lib/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export function GET(request: Request) {
     const setup = workspaceSetup();
     if (!setup) return status({ stage: "setup", personas: setupPersonas() });
     if (setup.hash && !unlocked(request)) return status({ stage: "locked" });
-    return status({ stage: "ready", accountName: setup.name });
+    return status({ stage: "ready" });
   } catch (error) { return failure(error); }
 }
 
@@ -32,27 +33,21 @@ function password(value: unknown, minimum: number) {
 export async function POST(request: Request) {
   try {
     localRequest(request);
-    const body = await fields(request, 28_000);
+    const body = await fields(request, 7_100_000);
     if (body.action === "login") {
       const name = field(body, "name", 80, true);
       const token = await signIn(name, password(body.password, 1));
-      return status({ stage: "ready", accountName: workspaceSetup()!.name }, token);
-    }
-    if (body.action === "logout") {
-      signOut(request);
-      if (!workspaceSetup()?.hash) throw new RequestError("No account is enabled.", 409);
-      return status({ stage: "locked" }, "");
+      return status({ stage: "ready" }, token);
     }
     if (body.action !== "finish") throw new RequestError("Unknown setup action.");
     if (workspaceSetup()) throw new RequestError("Setup is already complete. Reload Dundra to continue.", 409);
     const personaId = field(body, "personaId", 64);
     const persona = personaId
       ? { id: personaId }
-      : { name: field(body, "personaName", 80, true), description: field(body, "personaDescription", 4_000) };
+      : { name: field(body, "personaName", 80, true), description: field(body, "personaDescription", 4_000), portrait: readImage(body.personaPortrait) };
     const name = field(body, "accountName", 80, body.password !== undefined);
     const account = name ? await makeWorkspacePassword(name, password(body.password, 12)) : undefined;
-    const issued = account ? newWorkspaceSession() : undefined;
-    completeWorkspaceSetup(persona, account, issued?.session);
-    return status({ stage: "ready", accountName: name || null }, issued?.token);
+    completeWorkspaceSetup(persona, account);
+    return status({ stage: "ready" }, account ? newWorkspaceSession() : undefined);
   } catch (error) { return failure(error); }
 }

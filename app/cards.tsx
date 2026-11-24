@@ -121,26 +121,27 @@ export function CardsView({ library, onImport }: { library: Library; onImport: (
         </div> : <p>Import or create a character to export it.</p>}
       </section>
     </div>
-    <section className="transfer-panel transfer-history">
-      <h2>Chat history</h2>
-      <div className="form">
-        {library.characters.length > 0 && <><label>Import chat for<select value={chatCharacter || library.characters[0].id} disabled={!!status} onChange={event => setChatCharacter(event.target.value)}>
-          {library.characters.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <label>SillyTavern chat file<input type="file" accept=".jsonl,application/x-ndjson" disabled={!!status} onChange={async event => {
-            const file = event.target.files?.[0]; event.target.value = "";
-            if (!file) return;
-            setError(""); setMessage(""); setStatus("Importing chat…");
-            try {
-              const body = await chatImportBody(file, chatCharacter || library.characters[0].id);
-              const result = await read<Library>(await fetch("/api/library?format=jsonl", json(body)));
-              onImport(result); setMessage("Chat imported. Open it from My Chats.");
-            } catch (cause) { setError((cause as Error).message); }
-            finally { setStatus(""); }
-          }} /></label></>}
-        {library.chats.length > 0 && <><label>Export conversation<select value={chatId || library.chats[0].id} onChange={event => setChatId(event.target.value)}>{library.chats.map(chat => <option key={chat.id} value={chat.id}>{chat.title} · {chat.character} · {new Date(chat.updated).toLocaleDateString()}</option>)}</select></label>
-          <a className="secondary" href={"/api/library?format=jsonl&chat=" + encodeURIComponent(chatId || library.chats[0].id)} download><Download size={16}/> Export JSONL</a></>}
-      </div>
-    </section>
+    {(library.characters.length > 0 || library.chats.length > 0) &&
+      <section className="transfer-panel transfer-history">
+        <h2>Chat history</h2>
+        <div className="form">
+          {library.characters.length > 0 && <><label>Import chat for<select value={chatCharacter || library.characters[0].id} disabled={!!status} onChange={event => setChatCharacter(event.target.value)}>
+            {library.characters.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label>SillyTavern chat file<input type="file" accept=".jsonl,application/x-ndjson" disabled={!!status} onChange={async event => {
+              const file = event.target.files?.[0]; event.target.value = "";
+              if (!file) return;
+              setError(""); setMessage(""); setStatus("Importing chat…");
+              try {
+                const body = await chatImportBody(file, chatCharacter || library.characters[0].id);
+                const result = await read<Library>(await fetch("/api/library?format=jsonl", json(body)));
+                onImport(result); setMessage("Chat imported. Open it from My Chats.");
+              } catch (cause) { setError((cause as Error).message); }
+              finally { setStatus(""); }
+            }} /></label></>}
+          {library.chats.length > 0 && <><label>Export conversation<select value={chatId || library.chats[0].id} onChange={event => setChatId(event.target.value)}>{library.chats.map(chat => <option key={chat.id} value={chat.id}>{chat.title} · {chat.character} · {new Date(chat.updated).toLocaleDateString()}</option>)}</select></label>
+            <a className="secondary" href={"/api/library?format=jsonl&chat=" + encodeURIComponent(chatId || library.chats[0].id)} download><Download size={16}/> Export JSONL</a></>}
+        </div>
+      </section>}
     <dialog className="tag-dialog" ref={dialog} aria-labelledby="tag-title" onCancel={(event) => {
       if (status) event.preventDefault(); else setPreview(null);
     }}>

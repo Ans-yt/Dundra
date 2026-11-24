@@ -7,7 +7,7 @@ import type { ChatBonus } from "./chat-bonus";
 import { randomInt } from "node:crypto";
 import { allowsFunctions, headersForEndpoint } from "./chat-bonus";
 import { postProcessPrompt } from "./prompt-post-processing";
-type Prompt = { role: "system" | Message["role"]; content: string; media?:string; example?: boolean };
+type Prompt = { role: "system" | Message["role"]; content: string; media?: string | string[]; example?: boolean };
 
 export async function listModels(endpoint: string, key: string, signal: AbortSignal) {
   const response = await fetch(endpoint + "/models", {
@@ -135,6 +135,7 @@ async function* readStream(base: string, headers: Headers, payload: object, sign
     if (response.status === 401 || response.status === 403) {
       throw new Error("The provider denied the request (HTTP " + response.status + "). Check the API key and model access.");
     }
+    if (response.status === 429) throw new Error("The provider is rate-limiting this model. Try again shortly or choose another model.");
     throw new Error("The model endpoint did not return a reply stream (HTTP " + response.status + "). Check the model, token limits, and supported generation controls.");
   }
 

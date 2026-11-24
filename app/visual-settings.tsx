@@ -2,26 +2,30 @@
 
 import { useEffect, useState } from "react";
 import { Plus, X } from "lucide-react";
+import { FontField, fontImportLimit, fontImportUrl, validFontName } from "./font-picker";
 
 const storageKey = "dundra-visual-settings";
 const schemes = [
-  { id: "plum", name: "Plum", color: "#2e2e35" },
+  { id: "plum", name: "Plum", color: "#24232e" },
   { id: "graphite", name: "Graphite", color: "#252830" },
   { id: "twilight", name: "Twilight", color: "#2c2338" },
 ] as const;
 
 const fontTargets = [["system", "Interface"], ["plain", "Chat text"], ["dialogue", "Dialogue"], ["italic", "Italics"], ["code", "Code"]] as const;
 type FontTarget = (typeof fontTargets)[number][0];
-const fontChoices = ["system-ui", "Georgia", "Arial", "Segoe UI", "Lexend", "Inter", "DM Sans", "Instrument Serif", "IBM Plex Mono", "Consolas"];
 const cssLimit = 60_000;
-type Visuals = { fonts: Partial<Record<FontTarget, string>>; css: string; scheme: (typeof schemes)[number]["id"]; accent: string; size: number; chatSize: number; density: "comfortable" | "compact" };
-const defaults: Visuals = { fonts: {}, css: "", scheme: "plum", accent: "#f38ce8", size: 16, chatSize: 17, density: "comfortable" };
+type Visuals = { fonts: Partial<Record<FontTarget, string>>; imports: Record<string, string>; css: string; scheme: (typeof schemes)[number]["id"]; accent: string; size: number; chatSize: number; density: "comfortable" | "compact" };
+const defaults: Visuals = { fonts: {}, imports: {}, css: "", scheme: "plum", accent: "#d5b5f1", size: 16, chatSize: 17, density: "comfortable" };
 
 function readVisuals(): Visuals {
   try {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? localStorage.getItem("nitanor-visual-settings") ?? "{}");
     return {
       fonts: Object.fromEntries(fontTargets.flatMap(([key]) => typeof value.fonts?.[key] === "string" ? [[key, value.fonts[key].slice(0, 150)]] : [])),
+      imports: Object.fromEntries(Object.entries(value.imports ?? {}).slice(0, fontImportLimit).flatMap(([name, source]) => {
+        const url = typeof source === "string" && validFontName(name) ? fontImportUrl(source) : undefined;
+        return url ? [[name, url]] : [];
+      })),
       css: typeof value.css === "string" ? value.css.slice(0, cssLimit) : "",
       scheme: schemes.find((item) => item.id === value.scheme)?.id || defaults.scheme,
       accent: /^#[\da-f]{6}$/i.test(value.accent) ? value.accent : defaults.accent,
@@ -34,9 +38,20 @@ function readVisuals(): Visuals {
 
 function applyVisuals(value: Visuals) {
   const root = document.documentElement;
+  const fontUrls = new Set(Object.values(value.fonts).flatMap(font => Object.hasOwn(value.imports, font) ? [value.imports[font]] : []));
+  for (const link of document.head.querySelectorAll<HTMLLinkElement>("link[data-dundra-font]")) {
+    if (!fontUrls.delete(link.href)) link.remove();
+  }
+  for (const url of fontUrls) {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = url;
+    link.dataset.dundraFont = "";
+    document.head.insertBefore(link, document.getElementById("dundra-custom-css"));
+  }
   for (const [target] of fontTargets) {
     const font = value.fonts[target]?.trim();
-    if (font) root.style.setProperty("--dundra-font-" + target, font);
+    if (font) root.style.setProperty("--dundra-font-" + target, fontValue(font, value.imports));
     else root.style.removeProperty("--dundra-font-" + target);
   }
   let stylesheet = document.getElementById("dundra-custom-css");
@@ -62,11 +77,8 @@ export function useVisualPreferences() {
   useEffect(() => { applyVisuals(readVisuals()); }, []);
 }
 
-function FontField({ target, label, value, change }: { target: FontTarget; label: string; value: string; change: (font: string) => void }) {
-  return <label>{label}<input list={"fonts-" + target} value={value} maxLength={150} placeholder="Default"
-    onChange={event => change(event.target.value)} />
-    <datalist id={"fonts-" + target}>{fontChoices.map(font => <option key={font} value={font} />)}</datalist>
-  </label>;
+function fontValue(font: string, imports: Record<string, string>) {
+  return Object.hasOwn(imports, font) ? JSON.stringify(font) : font;
 }
 
 export function VisualSettings() {
@@ -89,6 +101,12 @@ export function VisualSettings() {
       localStorage.setItem(storageKey, JSON.stringify(next));
       setWarning("");
     } catch { setWarning("Your browser could not save these changes for next time."); }
+  }
+
+  function fontField(target: FontTarget, label: string) {
+    return <FontField label={label} value={value.fonts[target] ?? ""} imports={value.imports}
+      change={font => update({ ...value, fonts: { ...value.fonts, [target]: font } })}
+      addImport={(font, url) => update({ ...value, fonts: { ...value.fonts, [target]: font }, imports: { ...value.imports, [font]: url } })} />;
   }
 
   return <div className="settings-stack">
@@ -121,10 +139,10 @@ export function VisualSettings() {
         const sizeKey = system ? "size" : "chatSize";
         const label = system ? "Interface" : "In-chat";
         return <fieldset className="type-specimen" key={target}><legend>{label}</legend>
-          <div className={"type-preview type-preview-" + target} style={{ fontSize: value[sizeKey], fontFamily: value.fonts[target] || (system ? "var(--dundra-font-system, system-ui)" : "Georgia, serif") }}>
+          <div className={"type-preview type-preview-" + target} style={{ fontSize: value[sizeKey], fontFamily: system ? "var(--dundra-font-system, system-ui)" : "var(--dundra-font-plain, Georgia, serif)" }}>
             {system ? "Character library" : "The lantern flickered."}
           </div>
-          <FontField target={target} label={label + " font"} value={value.fonts[target] || ""} change={font => update({ ...value, fonts: { ...value.fonts, [target]: font } })}/>
+          {fontField(target, label + " font")}
           <label className="type-size">{label} size <select value={value[sizeKey]} onChange={e => update({ ...value, [sizeKey]: Number(e.target.value) })}>
             {Array.from({ length: system ? 7 : 21 }, (_, i) => i + (system ? 14 : 12)).map(px => <option key={px} value={px}>{px} px</option>)}
           </select></label>
@@ -138,8 +156,7 @@ export function VisualSettings() {
         update({ ...value, fonts: { ...value.fonts, [nextFont]: "" } }); setNextFont("");
       }}>Add</button></div>}
       {targets.map(([target, label]) => <div className="font-row" key={target}>
-        <FontField target={target} label={label + " font"} value={value.fonts[target] ?? ""}
-          change={font => update({ ...value, fonts: { ...value.fonts, [target]: font } })} />
+        {fontField(target, label + " font")}
         <button type="button" className="quiet" aria-label={"Remove " + label + " font override"} onClick={() => {
           const fonts = { ...value.fonts };
           delete fonts[target];
@@ -152,7 +169,7 @@ export function VisualSettings() {
         <textarea spellCheck={false} rows={5} maxLength={cssLimit} value={draftCss} placeholder={".chat-prose { line-height: 1.8; }"}
           onChange={event => setDraftCss(event.target.value)} aria-describedby="css-help" />
       </label>
-      <small id="css-help">Use Dundra selectors or add an @import at the top to load fonts from a URL you trust.</small>
+      <small id="css-help">Use Dundra’s selectors to style the interface. For fonts, use Import font in a font picker.</small>
       <div className="transfer-actions">
         <button type="button" className="primary" disabled={draftCss === value.css} onClick={() => update({ ...value, css: draftCss })}>Apply CSS</button>
         {value.css && <button type="button" className="secondary" onClick={() => { update({ ...value, css: "" }); setDraftCss(""); }}>Clear CSS</button>}

@@ -1,10 +1,12 @@
 import { workspaceRequest } from "../../../lib/access";
 import { applyRules, withScopedRules } from "../../../lib/regex-server";
-import { exportChatFile, importChatFile, originalFields, connectionAdvanced, chatModelConnection, character, changeChatOptions, chatPreferences, chooseChatPersona, chooseChatProfile, chooseChatThinking, conversation, deleteChat, deleteMessagesFrom, editChatMessage, forkChat, library, memoryStatus, persona, renameChat, saveCharacter, savePersona, selectChatVariant, setWorkspacePersona, startChat, workspacePersonaId } from "../../../lib/store";
+import { beginMemorySummary, exportChatFile, importChatFile, originalFields, connectionAdvanced, chatModelConnection, character, changeChatOptions, chatPreferences, chooseChatPersona, chooseChatProfile, chooseChatThinking, conversation, deleteChat, deleteMessagesFrom, editChatMessage, forkChat, library, memoryStatus, persona, renameChat, saveCharacter, savePersona, selectChatVariant, setWorkspacePersona, startChat, workspacePersonaId } from "../../../lib/store";
 import { failure, field, fields, RequestError } from "../../../lib/http";
 import { alternateGreetings, GREETING_LIMIT, TEXT_LIMIT } from "../../../lib/cards";
 import { readChatOptions } from "../../../lib/chat-options-input";
 import { readImage } from "../../../lib/media";
+import { summarizeChat } from "../../../lib/summarize-chat";
+import { after } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +51,11 @@ export async function POST(request: Request) {
       case "chat-options":
         return Response.json(changeChatOptions(id, readChatOptions(body), readImage(body.background),
           body.profileId === undefined ? undefined : body.profileId === null ? null : field(body, "profileId", 64) || null));
+      case "summarize-chat": {
+        const job = beginMemorySummary(id, true);
+        if (job) after(() => summarizeChat(id, job));
+        return Response.json(chatPreferences(id));
+      }
       case "chat-persona":
         chooseChatPersona(id, field(body, "personaId", 64) || null);
         return Response.json(chatSession(id));

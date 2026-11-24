@@ -45,10 +45,11 @@ function database() {
       default_persona_id TEXT REFERENCES personas(id) ON DELETE SET NULL,
       name TEXT, salt TEXT, hash TEXT
     );
-    CREATE TABLE IF NOT EXISTS workspace_sessions (session_key TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+    DROP TABLE IF EXISTS workspace_sessions;
     CREATE TABLE IF NOT EXISTS lorebooks (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, scan_depth INTEGER NOT NULL, entries TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS lorebook_image_settings (id TEXT PRIMARY KEY REFERENCES lorebooks(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS lorebook_budgets (id TEXT PRIMARY KEY REFERENCES lorebooks(id) ON DELETE CASCADE, tokens INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS lore_activations (message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
       ordinal INTEGER NOT NULL, starts TEXT NOT NULL, PRIMARY KEY(message_id, ordinal));
@@ -195,11 +196,12 @@ export function lorebookList(owner = "") {
 }
 
 function hydrateLorebook(row: Record<string, SQLOutputValue>): Lorebook {
-  return { id: String(row.id), name: String(row.name), scan_depth: Number(row.scan_depth), entries: JSON.parse(String(row.entries)), token_budget: Number(row.tokens ?? 0) };
+  return { id: String(row.id), name: String(row.name), scan_depth: Number(row.scan_depth), entries: JSON.parse(String(row.entries)), token_budget: Number(row.tokens ?? 0), image_attachments: Boolean(row.image_attachments) };
 }
 
 export function lorebook(id: string): Lorebook | undefined {
-  const row = database().prepare(`SELECT b.*, limits.tokens FROM lorebooks b LEFT JOIN lorebook_budgets limits ON limits.id = b.id WHERE b.id = ?`).get(id);
+  const row = database().prepare(`SELECT b.*, limits.tokens, images.id IS NOT NULL AS image_attachments FROM lorebooks b
+    LEFT JOIN lorebook_budgets limits ON limits.id = b.id LEFT JOIN lorebook_image_settings images ON images.id = b.id WHERE b.id = ?`).get(id);
   return row && hydrateLorebook(row);
 }
 
@@ -209,6 +211,8 @@ export function saveLorebook(book: Lorebook) {
     ON CONFLICT(id) DO UPDATE SET name=excluded.name, scan_depth=excluded.scan_depth, entries=excluded.entries`)
     .run(book.id, book.name, book.scan_depth, JSON.stringify(book.entries));
     db.prepare("INSERT OR REPLACE INTO lorebook_budgets VALUES (?, ?)").run(book.id, book.token_budget ?? 0);
+    if (book.image_attachments) db.prepare("INSERT OR IGNORE INTO lorebook_image_settings VALUES (?)").run(book.id);
+    else db.prepare("DELETE FROM lorebook_image_settings WHERE id = ?").run(book.id);
   });
 }
 
@@ -258,9 +262,9 @@ export function linkedChatLorebooks(chat: ChatLoreTargets) {
   const { inherited, direct } = linksForChat(chat);
   const ids = [...new Set([...inherited, ...direct])];
   if (!ids.length) return [];
-  return database().prepare(`SELECT b.*, limits.tokens FROM json_each(?) links
+  return database().prepare(`SELECT b.*, limits.tokens, images.id IS NOT NULL AS image_attachments FROM json_each(?) links
     JOIN lorebooks b ON b.id = links.value
-    LEFT JOIN lorebook_budgets limits ON limits.id = b.id ORDER BY links.key`).all(JSON.stringify(ids)).map(hydrateLorebook);
+    LEFT JOIN lorebook_budgets limits ON limits.id = b.id LEFT JOIN lorebook_image_settings images ON images.id = b.id ORDER BY links.key`).all(JSON.stringify(ids)).map(hydrateLorebook);
 }
 
 export function loreTiming(id: string, before = Number.MAX_SAFE_INTEGER): Record<string, number> {
@@ -951,7 +955,7 @@ export function finishReply(id: string, revision: number, action: ReplyAction, r
           WHERE message_id = ? AND active = 1`).run(reply, reasoning, action.messageId);
       }
       updateMessageContent(db, action.messageId, reply);
-      if (action.mode === "alternate") invalidateMemoriesFrom(db, id, action.messageId);
+      invalidateMemoriesFrom(db, id, action.messageId);
     }
     if (thinkingMs !== undefined) {
       db.prepare(`INSERT INTO reply_thinking_times VALUES (?, COALESCE((SELECT ordinal FROM message_variants WHERE message_id = ? AND active = 1), 1), ?)
@@ -986,18 +990,19 @@ export function memoryStatus(chatId: string): MemoryStatus {
     running: Number(row?.expires ?? 0) > Date.now(), error: String(row?.error ?? "") };
 }
 
-export function beginMemorySummary(chatId: string) {
-  if (!chatOptions(chatId).autoMemory.enabled) return;
+export function beginMemorySummary(chatId: string, manual = false) {
+  if (!manual && !chatOptions(chatId).autoMemory.enabled) return;
   return transaction(db => {
     const { autoMemory: settings, formats } = chatOptions(chatId);
-    if (!settings.enabled) return;
+    if (!manual && !settings.enabled) return;
     const state = db.prepare("SELECT * FROM chat_memory WHERE chat_id = ?").get(chatId);
     if (Number(state?.expires ?? 0) > Date.now()) return;
-    const covered = Number(state?.covered ?? 0);
+    const covered = manual && !state?.summary ? 0 : Number(state?.covered ?? 0);
     const stats = db.prepare("SELECT COUNT(*) AS count, MAX(id) AS head FROM messages WHERE chat_id = ? AND id > ?").get(chatId, covered);
-    if (Number(stats?.count) < settings.every) return;
+    if (!manual && Number(stats?.count) < settings.every) return;
     const current = conversation(chatId);
-    if (!current) return;
+    if (!current) throw new RequestError("Chat not found.", 404);
+    if (!Number(stats?.count)) throw new RequestError("There are no new messages to summarize.", 409);
     const lease = crypto.randomUUID();
     const connection = settings.profileId ? profileConnection(settings.profileId) : chatModelConnection(chatId).connection;
     db.prepare(`INSERT INTO chat_memory (chat_id, run, expires) VALUES (?, ?, ?)
@@ -1034,8 +1039,6 @@ export function finishMemorySummary(chatId: string, job: NonNullable<ReturnType<
   });
 }
 
-type WorkspaceSession = { key: string; expires: number };
-
 export function workspaceSetup() {
   return database().prepare("SELECT name, salt, hash FROM workspace_setup WHERE id = 1").get() as
     { name: string | null; salt: string | null; hash: string | null } | undefined;
@@ -1058,8 +1061,8 @@ export function setWorkspacePersona(personaId: string | null) {
   }
 }
 
-export function completeWorkspaceSetup(player: { id: string } | { name: string; description: string },
-  account?: { name: string; salt: string; hash: string }, session?: WorkspaceSession) {
+export function completeWorkspaceSetup(player: { id: string } | { name: string; description: string; portrait?: StoredImage | null },
+  account?: { name: string; salt: string; hash: string }) {
   transaction(db => {
     if (workspaceSetup()) throw new RequestError("Setup is already complete. Reload Dundra to continue.", 409);
     let personaId;
@@ -1069,23 +1072,9 @@ export function completeWorkspaceSetup(player: { id: string } | { name: string; 
     } else {
       personaId = crypto.randomUUID();
       db.prepare("INSERT INTO personas VALUES (?, ?, ?)").run(personaId, player.name, player.description);
+      writeImage(db, "persona_portraits", personaId, player.portrait);
     }
     db.prepare("INSERT INTO workspace_setup VALUES (1, ?, ?, ?, ?)").run(
       personaId, account?.name ?? null, account?.salt ?? null, account?.hash ?? null);
-    if (session) addWorkspaceSession(session);
   });
-}
-
-export function addWorkspaceSession(session: WorkspaceSession) {
-  const db = database();
-  db.prepare("DELETE FROM workspace_sessions WHERE expires <= ?").run(Date.now());
-  db.prepare("INSERT INTO workspace_sessions VALUES (?, ?)").run(session.key, session.expires);
-}
-
-export function hasWorkspaceSession(key: string, now: number) {
-  return Boolean(database().prepare("SELECT 1 FROM workspace_sessions WHERE session_key = ? AND expires > ?").get(key, now));
-}
-
-export function deleteWorkspaceSession(key: string) {
-  database().prepare("DELETE FROM workspace_sessions WHERE session_key = ?").run(key);
 }

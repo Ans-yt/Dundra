@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowLeft, LockKeyhole, Plus } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 import { NavigationIcon } from "./navigation-icon";
 import { WorkspaceGate } from "./onboarding";
 import type { Character, Chat, ChatPreferences, ChatSession, Library, Persona } from "../lib/types";
@@ -58,13 +58,10 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
 
 export default function Home() {
   useVisualPreferences();
-  return <WorkspaceGate>{(accountName, lock, locking, accessError) =>
-    <Workspace accountName={accountName} lock={lock} locking={locking} accessError={accessError} />}</WorkspaceGate>;
+  return <WorkspaceGate><Workspace /></WorkspaceGate>;
 }
 
-function Workspace({ accountName, lock, locking, accessError }: {
-  accountName: string | null; lock: () => Promise<void>; locking: boolean; accessError: string;
-}) {
+function Workspace() {
   const [data, setData] = useState(empty);
   const [tab, setTab] = useState<Tab>("Library");
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -342,6 +339,7 @@ function Workspace({ accountName, lock, locking, accessError }: {
       })}
       onThinking={(level) => void updatePreference({ action: "chat-thinking", profileId: preferences.provider.id, level })}
       onSettings={(changes) => changes.profileId !== undefined ? updateMessage({ action: "chat-profile", profileId: changes.profileId, includeMessages: true }) : updatePreference({ ...changes, action: "chat-options" })}
+      onSummarize={() => updatePreference({ action: "summarize-chat" })}
       onEdit={(messageId, content) => updateMessage({ action: "edit-message", messageId, content })}
       onVariant={(messageId, variant) => void updateMessage({ action: "select-variant", messageId, variant })}
       onFork={(messageId) => void action(async () => {
@@ -369,16 +367,12 @@ function Workspace({ accountName, lock, locking, accessError }: {
           aria-label={title} disabled={locked} onClick={() => visit(title)}><NavigationIcon name={icon} /><span className={title === "Import & export" ? "nav-long" : undefined}>{title}</span>
               {title === "Import & export" && <span className="nav-short">Transfer</span>}</button>)}
       </nav>
-      <div className="masthead-actions">
-        <button className="settings-link" aria-current={tab === "Settings" ? "page" : undefined}
-          aria-label="Settings" disabled={locked} onClick={() => visit("Settings")}><NavigationIcon name="settings" /><span>Settings</span></button>
-        {accountName && <button type="button" className="quiet" aria-label="Lock Dundra" title={"Lock Dundra · " + accountName}
-          disabled={locked || locking} onClick={() => void lock()}><LockKeyhole size={17} aria-hidden="true" /></button>}
-      </div>
+      <button className="settings-link" aria-current={tab === "Settings" ? "page" : undefined}
+        aria-label="Settings" disabled={locked} onClick={() => visit("Settings")}><NavigationIcon name="settings" /><span>Settings</span></button>
     </header>
     <main id="workspace">
       {loading && <Notice>Opening your workspace…</Notice>}
-      {(error || accessError) && <div className="error" role="alert">{error || accessError}</div>}
+      {error && <div className="error" role="alert">{error}</div>}
 
       {!loading && editor && <Section title={editor.item ? "Edit " + editor.kind : "New " + editor.kind}
         action={<button className="secondary" disabled={pending} onClick={() => setEditor(null)}><ArrowLeft size={16} /> Back</button>}>

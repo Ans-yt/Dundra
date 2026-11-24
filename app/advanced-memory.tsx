@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { BookOpen, Plus } from "lucide-react";
-import { memoryLimits, memoryPromptLimit, type AutoMemory, type MemoryStatus } from "../lib/auto-memory";
+import { useState, type FormEvent } from "react";
+import { BookOpen, Plus, RefreshCw } from "lucide-react";
+import { memoryLimits, memoryPromptLimit, type AutoMemory } from "../lib/auto-memory";
 import type { ChatPreferences } from "../lib/types";
 import { PresetDialog } from "./preset-dialog";
 import { SettingHelp, SettingsSwitch } from "./setting-help";
@@ -14,32 +14,17 @@ const tokenFields = [
   { key: "suggested", label: "Suggested output", help: "Asks the model to aim for this length. Use 0 for no suggestion." },
 ] as const;
 
-export function AdvancedMemory({ chatId, preferences, locked, error, close, save, openBook }: {
-  chatId: string; preferences: ChatPreferences; locked: boolean; error: string; close: () => void;
-  save: (value: AutoMemory) => Promise<boolean>; openBook: (id: string) => void;
+export function AdvancedMemory({ preferences, locked, error, close, save, summarize, openBook }: {
+  preferences: ChatPreferences; locked: boolean; error: string; close: () => void;
+  save: (value: AutoMemory) => Promise<boolean>; summarize: () => Promise<boolean>; openBook: (id: string) => void;
 }) {
   const [draft, setDraft] = useState(preferences.options.autoMemory);
-  const [status, setStatus] = useState(preferences.memoryStatus);
+  const status = preferences.memoryStatus;
+  const changed = JSON.stringify(draft) !== JSON.stringify(preferences.options.autoMemory);
   const [saveError, setSaveError] = useState("");
   const template = draft.templates.find(item => item.id === draft.templateId)!;
   const profiles = preferences.profiles;
   const change = (patch: Partial<AutoMemory>) => { setDraft(current => ({ ...current, ...patch })); setSaveError(""); };
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    async function refresh() {
-      try {
-        const response = await fetch("/api/library?memory=" + encodeURIComponent(chatId), { signal: controller.signal, cache: "no-store" });
-        if (!response.ok) return;
-        const next: MemoryStatus = await response.json();
-        setStatus(next);
-        if (next.running) timer = setTimeout(refresh, 1500);
-      } catch { /* The last known status remains visible. */ }
-    }
-    void refresh();
-    return () => { controller.abort(); clearTimeout(timer); };
-  }, [chatId]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -53,6 +38,23 @@ export function AdvancedMemory({ chatId, preferences, locked, error, close, save
   return <PresetDialog title="Advanced memory" close={close}>
     <form className="memory-form" onSubmit={submit}>
       <div className="memory-form-body">
+        <section className="memory-settings-section">
+          <div className="memory-run-title"><h3>Summary status</h3>
+            <div className="transfer-actions">
+              {status.bookId && <button type="button" className="secondary" onClick={() => openBook(status.bookId!)}><BookOpen size={15} /> View memories</button>}
+              <button type="button" className="secondary" disabled={locked || changed || status.running}
+                onClick={() => void summarize()}><RefreshCw size={15} /> Summarize now</button>
+            </div>
+          </div>
+          {(status.running || changed || (!status.summary && !status.error)) && <small className="memory-status" role="status">
+            {status.running ? "Writing a summary…" : changed ? "Save your changes before summarizing." : "No summary yet."}
+          </small>}
+          {!status.running && status.error && <p className="error" role="alert">{status.error}</p>}
+          {!status.running && status.summary && preferences.options.autoMemory.book && !status.bookId && <small className="memory-status">
+            No lorebook memories yet. The summary model adds one when it finds a new event with searchable keywords.
+          </small>}
+          {status.summary && <details className="memory-summary-preview"><summary>Latest generated summary</summary><p>{status.summary}</p></details>}
+        </section>
         <section className="memory-settings-section">
           <SettingsSwitch label="Automatic summaries" checked={draft.enabled} disabled={locked} onChange={enabled => change({ enabled })} />
           <div className="memory-cadence">
@@ -100,10 +102,6 @@ export function AdvancedMemory({ chatId, preferences, locked, error, close, save
         <section className="memory-settings-section">
           <SettingsSwitch label="Lorebook memory" checked={draft.book} disabled={locked} onChange={book => change({ book })}
             help="Saves key events as lorebook entries. Matching entries can return in later replies within this chat." />
-          {status.bookId && <button type="button" className="quiet memory-open-book" onClick={() => openBook(status.bookId!)}><BookOpen size={15} /> View memories</button>}
-          {status.running && <small role="status">Writing a summary…</small>}
-          {status.error && <p className="error" role="status">{status.error}</p>}
-          {status.summary && <details className="memory-summary-preview"><summary>Latest automatic summary</summary><p>{status.summary}</p></details>}
         </section>
       </div>
       <footer className="preset-dialog-actions">

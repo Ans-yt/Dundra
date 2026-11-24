@@ -3,7 +3,7 @@ import { RequestError } from "./http";
 import { countTextTokens } from "./tokens";
 import type { Lorebook, LoreEntry } from "./lorebook";
 
-type Source = Pick<Lorebook, "entries" | "scan_depth" | "token_budget"> & { id?: string };
+type Source = Pick<Lorebook, "entries" | "scan_depth" | "token_budget" | "image_attachments"> & { id?: string };
 export type LoreContext = {
   character?: string; characterId?: string; tags?: string[]; trigger?: string; seed?: string;
   messageCount?: number; previous?: Record<string, number>;
@@ -45,20 +45,24 @@ export function activeLore(books: Source[], history: { content: string }[], cont
   const activations: string[] = [];
   const automationIds = new Set<string>();
   const chosen: LoreEntry[] = [];
+  const visualEntries: { name: string; images: string[] }[] = [];
   const scans = new Map<number, string>();
   const candidates = books.flatMap((book, bookIndex) => book.entries
-    .filter(entry => entry.enabled && entry.content.trim() && matchesContext(entry, context) && turn >= (entry.delay ?? 0))
+    .filter(entry => entry.enabled && (entry.content.trim() || (book.image_attachments && entry.images?.length)) &&
+      matchesContext(entry, context) && turn >= (entry.delay ?? 0))
     .map(entry => {
       const depth = entry.scanDepth ?? book.scan_depth;
       if (!scans.has(depth)) scans.set(depth, depth ? history.slice(-depth).map(message => message.content).join("\n") : "");
-      const key = JSON.stringify([book.id ?? "embedded", entry.id, hash(JSON.stringify(entry))]);
+      const { images, ...textEntry } = entry;
+      const key = JSON.stringify([book.id ?? "embedded", entry.id, hash(JSON.stringify(textEntry))]);
+      const activeImages = book.image_attachments ? images : undefined;
       const age = turn - (context.previous?.[key] ?? -Infinity);
       const sticky = age >= 0 && age <= (entry.sticky || 0);
       const cooling = !sticky && age >= 0 && age <= (entry.sticky || 0) + (entry.cooldown || 0);
       const groups = (entry.group ?? "").split(",").map(label => label.trim()).filter(Boolean);
       const draw = (hash(JSON.stringify([context.seed, turn, key])) + 1) / 4294967297;
       const rank = -Math.log(draw) / Math.max(0, entry.groupWeight ?? 100);
-      return { entry, depth, key, bookIndex, sticky, cooling, groups, rank };
+      return { entry, depth, key, bookIndex, sticky, cooling, groups, rank, activeImages };
     }));
   const used = new Set<string>();
   let regexTime = 0;
@@ -113,15 +117,16 @@ export function activeLore(books: Source[], history: { content: string }[], cont
         remaining[bookIndex] -= cost;
       }
       groups.forEach(group => occupied.add(group));
-      chosen.push(entry);
+      if (entry.content.trim()) chosen.push(entry);
+      if (row.activeImages?.length) visualEntries.push({ name: entry.name || "Lorebook entry", images: row.activeImages });
       if (!row.sticky && (entry.sticky || entry.cooldown)) activations.push(row.key);
       if (entry.automationId) automationIds.add(entry.automationId);
-      if (!entry.preventRecursion) added.push(entry.content);
+      if (!entry.preventRecursion && entry.content.trim()) added.push(entry.content);
     }
     if (added.length) recursed += "\n" + added.join("\n");
     else if (!recursed || !candidates.some(row => !used.has(row.key) && Number(row.entry.delayUntilRecursion || 0) > round)) break;
   }
   chosen.sort((a, b) => a.insertion_order - b.insertion_order);
   const at = (position: LoreEntry["position"]) => [...new Set(chosen.filter(entry => entry.position === position).map(entry => entry.content))];
-  return { at_depth: chosen.filter(entry => entry.position === "at_depth").map(entry => ({ content: entry.content, depth: entry.depth ?? 4 })), before_char: at("before_char"), after_char: at("after_char"), activations, automationIds: [...automationIds] };
+  return { at_depth: chosen.filter(entry => entry.position === "at_depth").map(entry => ({ content: entry.content, depth: entry.depth ?? 4 })), before_char: at("before_char"), after_char: at("after_char"), visualEntries, activations, automationIds: [...automationIds] };
 }

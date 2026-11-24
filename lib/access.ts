@@ -1,10 +1,13 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { localRequest, RequestError } from "./http";
-import { addWorkspaceSession, deleteWorkspaceSession, hasWorkspaceSession, workspaceSetup } from "./store";
+import { workspaceSetup } from "./store";
 
 const lifetime = 7 * 24 * 60 * 60;
 const cookie = "dundra_session";
 const attempts = { count: 0, reset: 0 };
+// Next can load this module from separate route bundles. Share sessions within the running server.
+const runtime = globalThis as typeof globalThis & { dundraSessions?: Map<string, number> };
+const sessions = runtime.dundraSessions ??= new Map<string, number>();
 
 function digest(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -18,12 +21,12 @@ function sessionKey(request: Request) {
 
 export function unlocked(request: Request) {
   const key = sessionKey(request);
-  return Boolean(key && hasWorkspaceSession(key, Date.now()));
+  return Boolean(key && (sessions.get(key) ?? 0) > Date.now());
 }
 
 export function workspaceRequest(request: Request) {
   localRequest(request);
-  if (workspaceSetup()?.hash && !unlocked(request)) throw new RequestError("Unlock Dundra to continue.", 401);
+  if (workspaceSetup()?.hash && !unlocked(request)) throw new RequestError("Sign in to Dundra to continue.", 401);
 }
 
 function hashPassword(password: string, salt: string): Promise<Buffer> {
@@ -42,11 +45,14 @@ export async function makeWorkspacePassword(name: string, password: string) {
 
 export function newWorkspaceSession() {
   const token = randomBytes(32).toString("base64url");
-  return { token, session: { key: digest(token), expires: Date.now() + lifetime * 1000 } };
+  const now = Date.now();
+  for (const [key, expires] of sessions) if (expires <= now) sessions.delete(key);
+  sessions.set(digest(token), now + lifetime * 1000);
+  return token;
 }
 
 export function sessionCookie(token: string) {
-  return `${cookie}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${token ? lifetime : 0}`;
+  return `${cookie}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${lifetime}`;
 }
 
 export async function signIn(name: string, password: string) {
@@ -65,12 +71,5 @@ export async function signIn(name: string, password: string) {
     throw new RequestError("Account name or password is incorrect.", 401);
   }
   attempts.count = 0;
-  const { token, session } = newWorkspaceSession();
-  addWorkspaceSession(session);
-  return token;
-}
-
-export function signOut(request: Request) {
-  const key = sessionKey(request);
-  if (key) deleteWorkspaceSession(key);
+  return newWorkspaceSession();
 }

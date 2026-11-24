@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { BookOpen, ChevronDown, Download, Plus, Trash2, Upload } from "lucide-react";
-import { blankLoreEntry, loreEntryLimit, type Lorebook, type LoreEntry, type LoreScope } from "../lib/lorebook";
+import { blankLoreEntry, lorebookFileLimit, loreEntryLimit, type Lorebook, type LoreEntry, type LoreScope } from "../lib/lorebook";
 import { LoreEntryFields } from "./lore-entry-fields";
+import { SettingsSwitch } from "./setting-help";
 import { PresetDialog } from "./preset-dialog";
 import { downloadJson } from "./tavern-editors";
 
@@ -22,7 +23,7 @@ async function read<T>(query = "", body?: object): Promise<T> {
 
 function changed() { window.dispatchEvent(new Event("lorebooks-change")); }
 
-function useBooks(query: string, enabled = true) {
+function useBooks(query: string, enabled = true, refreshKey?: string | null) {
   const [data, setData] = useState(empty);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -38,7 +39,7 @@ function useBooks(query: string, enabled = true) {
     refresh();
     window.addEventListener("lorebooks-change", refresh);
     return () => { active = false; window.removeEventListener("lorebooks-change", refresh); };
-  }, [query, enabled]);
+  }, [query, enabled, refreshKey]);
   return { data, error, setData };
 }
 
@@ -47,12 +48,13 @@ export function LoreLinks({ scope, id, contextKey, disabled }: { scope: LoreScop
   const [manage, setManage] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const query = "?" + new URLSearchParams({ scope, owner: id, ...(contextKey && { persona: contextKey }) });
-  const { data, error: loadError, setData } = useBooks(query, scope === "chat" || open);
+  const query = "?" + new URLSearchParams({ scope, owner: id });
+  const { data, error: loadError, setData } = useBooks(query, scope === "chat" || open, contextKey);
   const active = data.books.filter(book => data.direct.includes(book.id) || data.inherited.includes(book.id));
   return <>
     <details className={"lore-links lore-links-" + scope} onToggle={event => setOpen(event.currentTarget.open)}>
-      <summary className="secondary"><BookOpen size={15} aria-hidden="true" /><span>Lorebooks{scope === "chat" ? ": " + (active.length === 1 ? active[0].name : active.length || "None") : ""}</span>
+      <summary className={scope === "persona" ? "persona-lore-summary" : "secondary"}><BookOpen size={15} aria-hidden="true" />
+        <span>{scope === "persona" ? "Linked lorebooks" : "Lorebooks"}{scope === "chat" ? ": " + (active.length === 1 ? active[0].name : active.length || "None") : ""}</span>
         <ChevronDown size={13} aria-hidden="true" /></summary>
       <div className="lore-menu">
         {(error || loadError) && <p role="alert" className="error">{error || loadError}</p>}
@@ -81,15 +83,18 @@ export function LoreLinks({ scope, id, contextKey, disabled }: { scope: LoreScop
 export function LorebookEditor({ chatId, initialBook }: { chatId?: string; initialBook?: string } = {}) {
   const { data, error: loadError } = useBooks(chatId ? "?" + new URLSearchParams({ scope: "chat", owner: chatId }) : "");
   const [book, setBook] = useState<Lorebook>();
+  const [opening, setOpening] = useState(Boolean(initialBook));
   useEffect(() => {
     if (!initialBook) return;
     let active = true;
     read<Lorebook>("?book=" + encodeURIComponent(initialBook)).then(item => {
       if (active) setBook(item);
-    }).catch(cause => { if (active) setError(cause.message); });
+    }).catch(cause => { if (active) setError(cause.message); }).finally(() => { if (active) setOpening(false); });
     return () => { active = false; };
   }, [initialBook]);
-  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [readingImages, setReadingImages] = useState(false);
+  const busy = saving || readingImages || opening;
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [deletePending, setDeletePending] = useState(false);
@@ -97,29 +102,33 @@ export function LorebookEditor({ chatId, initialBook }: { chatId?: string; initi
   const [openEntry, setOpenEntry] = useState<string>();
 
   async function perform(run: () => Promise<void>) {
-    setBusy(true);
+    setSaving(true);
     setError("");
     setStatus("");
     try { await run(); }
     catch (cause) { setError((cause as Error).message); }
-    finally { setBusy(false); }
+    finally { setSaving(false); }
   }
 
   function patchEntry(id: string, update: Partial<LoreEntry>) {
     setBook(current => current && { ...current, entries: current.entries.map(entry => entry.id === id ? { ...entry, ...update } : entry) });
   }
 
-  const visibleEntries = book?.entries.filter(entry => [entry.name, ...entry.keys, entry.group, entry.automationId].join(" ").toLowerCase().includes(query.trim().toLowerCase())) ?? [];
+  const filter = query.trim().toLowerCase();
+  const visibleEntries = book ? (filter ? book.entries.filter(entry =>
+    [entry.name, ...entry.keys, ...entry.secondary_keys, entry.content, entry.group, entry.automationId].some(text => text?.toLowerCase().includes(filter))
+  ) : book.entries) : [];
   return <div className="lore-editor settings-stack">
-    <section className="settings-panel">
+    <section className="settings-panel lore-library">
       <h2>Lorebooks</h2>
-      <label>Saved lorebook<select value={book?.id || ""} disabled={busy} onChange={event => {
+      <div className="lore-library-controls">
+      <label>Saved lorebook<select value={book?.id || ""} disabled={busy || !data.books.length} onChange={event => {
         const id = event.target.value;
         setQuery(""); setOpenEntry(undefined);
         setDeletePending(false);
         void perform(async () => setBook(id ? await read<Lorebook>("?book=" + encodeURIComponent(id)) : undefined));
       }}>
-        <option value="">Choose a lorebook</option>
+        <option value="">{opening ? "Opening lorebook…" : data.books.length ? "Choose a lorebook" : "No saved lorebooks"}</option>
         {data.books.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select></label>
       <div className="transfer-actions">
@@ -128,18 +137,22 @@ export function LorebookEditor({ chatId, initialBook }: { chatId?: string; initi
           setBook({ id: "", name: "", scan_depth: 4, entries: [] });
           setDeletePending(false); setStatus(""); setError("");
         }}><Plus size={16} /> New lorebook</button>
-        <label className="secondary advanced-upload"><Upload size={15} /> Import JSON
+        <label className="secondary advanced-upload"><Upload size={16} /> <span>Import JSON</span>
           <input type="file" accept=".json,application/json" aria-label="Import lorebook JSON" disabled={busy} onChange={event => {
             const file = event.target.files?.[0];
             event.target.value = "";
             if (!file) return;
             void perform(async () => {
-              if (file.size > 2_000_000) throw Error("Choose a JSON file under 2 MB.");
-              const imported = await read<Lorebook>("", { action: "save", book: JSON.parse(await file.text()), filename: file.name.replace(/\.json$/i, "").slice(0, 100) });
+              if (file.size >= lorebookFileLimit) throw Error("Choose a JSON file under 12 MB.");
+              let source: unknown;
+              try { source = JSON.parse((await file.text()).replace(/^\uFEFF/, "")); }
+              catch { throw Error("This file is not valid JSON. Choose a lorebook JSON export."); }
+              const imported = await read<Lorebook>("", { action: "save", book: source, filename: file.name.replace(/\.json$/i, "").slice(0, 100) });
               setQuery(""); setOpenEntry(undefined); setBook(imported); setDeletePending(false); changed(); setStatus("Lorebook imported.");
             });
           }} />
         </label>
+      </div>
       </div>
       {(error || loadError) && <p role="alert" className="error">{error || loadError}</p>}
       {status && <p role="status">{status}</p>}
@@ -151,15 +164,22 @@ export function LorebookEditor({ chatId, initialBook }: { chatId?: string; initi
         <label>Lorebook name<input value={book.name} maxLength={100} disabled={busy} onChange={event => setBook({ ...book, name: event.target.value })}/></label>
         <label>Scan recent messages<input type="number" min={1} max={100} value={book.scan_depth || ""} disabled={busy}
           onChange={event => setBook({ ...book, scan_depth: Number(event.target.value) })}/></label>
-        <label>Token budget<input type="number" min={0} max={1000000} placeholder="Unlimited" value={book.token_budget || ""} onChange={event => setBook({ ...book, token_budget: Math.min(1000000, Math.max(0, Number(event.target.value))) })}/></label>
+        <label>Token budget<input type="number" min={0} max={1000000} placeholder="Unlimited" disabled={busy} value={book.token_budget || ""} onChange={event => setBook({ ...book, token_budget: Math.min(1000000, Math.max(0, Number(event.target.value))) })}/></label>
+      </div>
+      <div className="lore-image-setting">
+        <SettingsSwitch label="Lorebook images (experimental)" checked={book.image_attachments ?? false} disabled={busy}
+          onChange={enabled => setBook({ ...book, image_attachments: enabled })} />
+        <small>Attach up to three images per entry. Matching entries send images to your model when Send inline media is on.</small>
       </div>
       <div className="lore-index-head"><h3>Entries <small>{book.entries.length}</small></h3>{book.entries.length > 0 && <input type="search" aria-label="Find entries" placeholder="Find an entry…" value={query} onChange={event => setQuery(event.target.value)}/>}</div>
-      {query && !visibleEntries.length && <p>No matching entries.</p>}
+      {!book.entries.length && <p className="lore-empty">Add an entry for a person, place, or detail the chat should remember.</p>}
+      {filter && !visibleEntries.length && <p role="status">No matching entries.</p>}
       <div className="lore-entry-list">{visibleEntries.map(entry => <details className="lore-entry" key={entry.id} open={openEntry === entry.id}>
         <summary onClick={event => { event.preventDefault(); setOpenEntry(openEntry === entry.id ? undefined : entry.id); }}>
           <ChevronDown size={15}/><span><strong>{entry.name.trim() || entry.keys.join(", ") || "Untitled entry"}</strong>
             <small>{entry.enabled ? (entry.constant ? "Always active" : entry.keys.join(" · ") || "No activation keys") : "Disabled"}</small></span></summary>
-        {openEntry === entry.id && <fieldset disabled={busy} className="lore-entry-body"><LoreEntryFields entry={entry} depth={book.scan_depth} change={update => patchEntry(entry.id, update)} />
+        {openEntry === entry.id && <fieldset disabled={busy} className="lore-entry-body"><LoreEntryFields entry={entry} depth={book.scan_depth} imagesEnabled={book.image_attachments}
+          onReading={setReadingImages} change={update => patchEntry(entry.id, update)} />
         <button type="button" className="quiet danger" onClick={() => setBook({ ...book, entries: book.entries.filter(item => item.id !== entry.id) })}>Remove entry</button>
       </fieldset>}</details>)}</div>
       <button type="button" className="secondary lore-add-entry" disabled={busy || book.entries.length >= loreEntryLimit}
@@ -170,7 +190,8 @@ export function LorebookEditor({ chatId, initialBook }: { chatId?: string; initi
           changed(); setStatus("Lorebook saved.");
         })}>Save lorebook</button>
         <button type="button" className="secondary" disabled={busy} onClick={() => downloadJson(book.name || "lorebook", {
-          name: book.name, scan_depth: book.scan_depth, token_budget: book.token_budget ?? 0, entries: book.entries,
+          name: book.name, scan_depth: book.scan_depth, token_budget: book.token_budget ?? 0,
+          image_attachments: book.image_attachments ?? false, entries: book.entries,
         })}><Download size={15} /> Export JSON</button>
         {book.id && <button type="button" className="quiet danger" disabled={busy} onClick={() => setDeletePending(true)}><Trash2 size={15} /> Delete</button>}
       </div>

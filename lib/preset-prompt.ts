@@ -6,7 +6,7 @@ import { RequestError } from "./http";
 import { activeLore } from "./lore-activation";
 import { withEmbeddedLore } from "./lorebook";
 
-type Entry = {role:"user"|"system"|"assistant";content:string;media?:string;example?:boolean};
+type Entry = {role:"user"|"system"|"assistant";content:string;media?: string | string[];example?:boolean};
 export function arrangePreset(preset:Preset, base:Entry[], settings:GenerationSettings, card:CardFields, instructions:string, persona:string, memory:string, expand:(s:string)=>string, mode:string, worldRegex:(value:string)=>string = value=>value, examples:ChatBonus["examples"]="normal", linkedLore?: ReturnType<typeof activeLore>, embeddedLore?: ReturnType<typeof activeLore>, depthEntries: { content: string; depth: number }[] = []) {
   const orders = preset.prompt_order ?? [];
   const order = (orders.find(o=>o.character_id===100001) ?? orders.at(-1))?.order;

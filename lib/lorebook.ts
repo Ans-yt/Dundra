@@ -1,4 +1,7 @@
 export const loreEntryLimit = 1000;
+export const loreImageLimit = 3;
+export const loreImageBytes = 1_048_576;
+export const lorebookFileLimit = 12_000_000;
 export type LoreScope = "character" | "persona" | "chat";
 
 export type LoreEntry = {
@@ -7,6 +10,7 @@ export type LoreEntry = {
   keys: string[];
   secondary_keys: string[];
   content: string;
+  images?: string[];
   enabled: boolean;
   constant: boolean;
   match_whole_words?: boolean;
@@ -35,7 +39,7 @@ export type LoreEntry = {
   triggers?: string[];
 };
 
-export type Lorebook = { id: string; name: string; scan_depth: number; token_budget?: number; entries: LoreEntry[] };
+export type Lorebook = { id: string; name: string; scan_depth: number; token_budget?: number; image_attachments?: boolean; entries: LoreEntry[] };
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -59,6 +63,16 @@ export function blankLoreEntry(): LoreEntry {
     selective: false, case_sensitive: false, position: "before_char", insertion_order: 100 };
 }
 
+function readLoreImages(value: unknown): string[] | undefined {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length > loreImageLimit) throw Error("Use up to three images per lorebook entry.");
+  if (value.some(image => typeof image !== "string" || image.length > Math.ceil(loreImageBytes / 3) * 4 + 32 ||
+    !/^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(image))) {
+    throw Error("Choose PNG, JPEG, WebP, or GIF images up to 1 MB each.");
+  }
+  return value.length ? value : undefined;
+}
+
 export function readLorebook(input: unknown, fallbackName = "Untitled lorebook"): Omit<Lorebook, "id"> {
   const root = object(input);
   const raw = root.character_book ?? object(root.data).character_book ?? input;
@@ -77,6 +91,7 @@ export function readLorebook(input: unknown, fallbackName = "Untitled lorebook")
     name: string(book.name, 100).trim() || fallbackName.slice(0, 100),
     scan_depth: integer(book.scan_depth ?? book.scanDepth, 4, 1, 100),
     token_budget: integer(book.token_budget ?? book.tokenBudget, 0, 0, 1000000),
+    image_attachments: book.image_attachments === true,
     entries: entries.map((value, index) => {
       const entry = object(value);
       const ext = object(entry.extensions);
@@ -106,6 +121,7 @@ export function readLorebook(input: unknown, fallbackName = "Untitled lorebook")
         excludeCharacters: (entry.excludeCharacters ?? filter.isExclude) === true,
         triggers: list(entry.triggers ?? ext.triggers),
         content: string(entry.content, 20_000),
+        images: typeof book.image_attachments === "boolean" ? readLoreImages(entry.images) : undefined,
         enabled: entry.enabled !== false && entry.disable !== true,
         constant: entry.constant === true, selective: entry.selective === true,
         match_whole_words: (entry.match_whole_words ?? entry.matchWholeWords ?? ext.match_whole_words) === true,
@@ -121,6 +137,6 @@ export function readLorebook(input: unknown, fallbackName = "Untitled lorebook")
 
 export function withEmbeddedLore(embedded: unknown, books: Lorebook[]) {
   if (!embedded) return books;
-  try { return [readLorebook(embedded, "Character card"), ...books]; }
+  try { return [{ ...readLorebook(embedded, "Character card"), image_attachments: false }, ...books]; }
   catch { return books; }
 }

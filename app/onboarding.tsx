@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Check, LibraryBig, LockKeyhole, MessageSquare, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, LibraryBig, MessageSquare, SlidersHorizontal } from "lucide-react";
 import type { SetupStatus } from "../lib/onboarding";
 import { NavigationIcon } from "./navigation-icon";
+import { ImagePicker } from "./media";
 
 const endpoint = "/api/onboarding";
 const steps = [
@@ -20,9 +21,7 @@ async function getStatus(response: Response): Promise<SetupStatus> {
 
 type AccessActions = { error: string; busy: boolean; submit: (body: Record<string, unknown>) => Promise<void> };
 
-export function WorkspaceGate({ children }: {
-  children: (accountName: string | null, lock: () => Promise<void>, locking: boolean, error: string) => ReactNode;
-}) {
+export function WorkspaceGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<SetupStatus>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,9 +47,11 @@ export function WorkspaceGate({ children }: {
       channel.current.addEventListener("message", update);
     }
     window.addEventListener("dundra:check-access", update);
+    window.addEventListener("focus", update);
     return () => {
       revision.current += 1;
       window.removeEventListener("dundra:check-access", update);
+      window.removeEventListener("focus", update);
       channel.current?.close();
       channel.current = null;
     };
@@ -82,11 +83,11 @@ export function WorkspaceGate({ children }: {
     }
   }
 
-  if (status?.stage === "ready") return children(status.accountName, () => submit({ action: "logout" }), busy, error);
+  if (status?.stage === "ready") return children;
 
   return <main className="welcome-shell">
     {status?.stage === "setup" && <Walkthrough personas={status.personas} busy={busy} error={error} submit={submit} />}
-    {status?.stage === "locked" && <Unlock busy={busy} error={error} submit={submit} />}
+    {status?.stage === "locked" && <SignIn busy={busy} error={error} submit={submit} />}
     {!status && <section className="welcome-card welcome-locked" aria-label="Dundra">
       <Brand />
       {error ? <>
@@ -105,6 +106,7 @@ function Walkthrough({ personas, busy, error, submit }: AccessActions & { person
   const [step, setStep] = useState(0);
   const [personaId, setPersonaId] = useState(personas[0]?.id || "");
   const [personaName, setPersonaName] = useState("");
+  const [personaPortrait, setPersonaPortrait] = useState<string | null>(null);
   const [personaDescription, setPersonaDescription] = useState("");
   const [accountName, setAccountName] = useState("");
   const [formError, setFormError] = useState("");
@@ -117,7 +119,7 @@ function Walkthrough({ personas, busy, error, submit }: AccessActions & { person
   }
 
   function finish(account?: { accountName: string; password: string }) {
-    void submit({ action: "finish", personaId, personaName, personaDescription, ...account });
+    void submit({ action: "finish", personaId, personaName, personaDescription, ...(!personaId && { personaPortrait }), ...account });
   }
 
   function createAccount(event: FormEvent<HTMLFormElement>) {
@@ -172,8 +174,11 @@ function Walkthrough({ personas, busy, error, submit }: AccessActions & { person
               <option value="">Create a new persona</option>
             </select></label>}
             {!personaId && <>
-              <label>Persona name<input autoComplete="off" maxLength={80} required value={personaName}
-                onChange={event => setPersonaName(event.target.value)} placeholder="e.g. Rowan" /></label>
+              <div className="persona-identity welcome-persona">
+                <ImagePicker avatar label="Persona avatar" src={personaPortrait} change={setPersonaPortrait} />
+                <label>Persona name<input autoComplete="off" maxLength={80} required value={personaName}
+                  onChange={event => setPersonaName(event.target.value)} placeholder="e.g. Rowan" /></label>
+              </div>
               <label><span>Description <span className="welcome-optional">(optional)</span></span>
                 <textarea rows={3} maxLength={4000} value={personaDescription} placeholder="What should the character know about you?"
                   onChange={event => setPersonaDescription(event.target.value)} /></label>
@@ -187,8 +192,8 @@ function Walkthrough({ personas, busy, error, submit }: AccessActions & { person
       </form>}
       {step === 2 && <form className="welcome-flow" onSubmit={createAccount}>
         <div className="welcome-pane">
-          <h1 id="welcome-heading" ref={heading} tabIndex={-1}>Lock your workspace?</h1>
-          <p className="welcome-muted">A password lets you lock Dundra when you’re done. You can skip this step.</p>
+          <h1 id="welcome-heading" ref={heading} tabIndex={-1}>Set up sign-in?</h1>
+          <p className="welcome-muted">With an account, each browser signs in the first time it opens Dundra after the server starts.</p>
           <div className="welcome-fields">
             <label>Account name<input name="username" required maxLength={80} autoComplete="username" value={accountName} disabled={busy}
               onChange={event => setAccountName(event.target.value)} /></label>
@@ -212,7 +217,7 @@ function Walkthrough({ personas, busy, error, submit }: AccessActions & { person
   </div>;
 }
 
-function Unlock({ busy, error, submit }: AccessActions) {
+function SignIn({ busy, error, submit }: AccessActions) {
   return <form className="welcome-card welcome-locked" onSubmit={event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -220,14 +225,13 @@ function Unlock({ busy, error, submit }: AccessActions) {
   }}>
     <Brand />
     <div>
-      <h1>Unlock Dundra</h1>
-      <p className="welcome-muted">Sign in to your local workspace.</p>
+      <h1>Sign in to Dundra</h1>
     </div>
     <div className="welcome-fields">
       <label>Account name<input name="name" required maxLength={80} autoComplete="username" /></label>
       <label>Password<input name="password" type="password" maxLength={256} required autoComplete="current-password" /></label>
     </div>
     {error && <p className="error" role="alert">{error}</p>}
-    <button className="primary" disabled={busy}><LockKeyhole size={16} aria-hidden="true" /> {busy ? "Unlocking…" : "Unlock"}</button>
+    <button className="primary" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
   </form>;
 }

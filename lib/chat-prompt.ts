@@ -3,7 +3,7 @@ import { RequestError } from "./http";
 import type { Message } from "./types";
 import type { ChatBonus } from "./chat-bonus";
 
-type PromptMessage = {role:"user"|"assistant"|"system";content:string;media?:string};
+type PromptMessage = {role:"user"|"assistant"|"system";content:string;media?: string | string[]; example?: boolean };
 
 export function buildPrompt(system: string, history: Message[], input: string | null, settings: GenerationSettings, media?: string,
   examples?: { text: string; behavior: ChatBonus["examples"] }) {

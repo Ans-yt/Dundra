@@ -38,10 +38,11 @@ function profileHost(endpoint: string) {
   try { return new URL(endpoint).host; } catch { return endpoint; }
 }
 
-export function ChatSettings({ preferences, advanced, chatId, locked, error, onClose, onModelsChanged, onSave, onPreview, width, onWidth }: {
+export function ChatSettings({ preferences, advanced, chatId, locked, error, onClose, onModelsChanged, onSave, onSummarize, onPreview, width, onWidth }: {
   preferences: ChatPreferences; advanced: Advanced; chatId: string; locked: boolean; error: string; onClose: () => void;
   width: number; onWidth: (width: number) => void;
   onModelsChanged: (model: string | null) => Promise<boolean>;
+  onSummarize: () => Promise<boolean>;
   onSave: (changes: ChatSettingsChange) => Promise<boolean>; onPreview: (draft: ChatViewPreview | null) => void;
 }) {
   const [position, setPosition] = useState<{x: number; y: number; dock: "left" | "right" | "float"}>({ x: 0, y: 0, dock: "right" });
@@ -348,7 +349,7 @@ export function ChatSettings({ preferences, advanced, chatId, locked, error, onC
       {!editingProfile && <button type="submit" form="chat-settings-form" className="primary" disabled={locked}>Save {tab === "Memory" ? "memory" : tab === "Customize" ? "customization" : tab === "Bonus" ? "bonus settings" : "settings"}</button>}
     </div>}
   </aside>
-    {advancedMemory && <AdvancedMemory chatId={chatId} preferences={preferences} locked={locked} error={error}
+    {advancedMemory && <AdvancedMemory preferences={preferences} locked={locked} error={error} summarize={onSummarize}
       close={() => setAdvancedMemory(false)} save={autoMemory => onSave({ autoMemory })}
       openBook={id => { setAdvancedMemory(false); setMemoryBook(id); }} />}
     {memoryBook && <PresetDialog title="Lorebook memory" close={() => { setMemoryBook(undefined); setAdvancedMemory(true); }}>

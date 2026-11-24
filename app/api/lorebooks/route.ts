@@ -1,6 +1,7 @@
 import { workspaceRequest } from "../../../lib/access";
 import { fields, field, failure, RequestError } from "../../../lib/http";
-import { readLorebook, type LoreScope } from "../../../lib/lorebook";
+import { readImage } from "../../../lib/media";
+import { lorebookFileLimit, loreImageBytes, readLorebook, type LoreScope } from "../../../lib/lorebook";
 import { chatLorebookLinks, deleteLorebook, lorebook, lorebookList, loreLinks, saveLorebook, setLoreLink } from "../../../lib/store";
 
 export const runtime = "nodejs";
@@ -35,7 +36,7 @@ export function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     workspaceRequest(request);
-    const body = await fields(request, 3_000_000);
+    const body = await fields(request, lorebookFileLimit);
     const id = field(body, "id", 64);
     switch (body.action) {
       case "link":
@@ -49,6 +50,11 @@ export async function POST(request: Request) {
         let normalized;
         try { normalized = readLorebook(body.book, field(body, "filename", 100) || undefined); }
         catch (error) { throw new RequestError(error instanceof Error ? error.message : "Invalid lorebook."); }
+        for (const entry of normalized.entries) {
+          for (const image of entry.images ?? []) {
+            if (readImage(image)!.bytes.byteLength > loreImageBytes) throw new RequestError("Choose images up to 1 MB each.", 413);
+          }
+        }
         const book = { ...normalized, id: id || crypto.randomUUID() };
         if (id && !lorebook(id)) throw new RequestError("Lorebook not found.", 404);
         saveLorebook(book);

@@ -20,7 +20,7 @@ export async function summarizeChat(chatId: string, job: NonNullable<ReturnType<
       expandNames(template.prompt, chat.character, player),
       settings.suggested ? `Aim for at most ${settings.suggested} output tokens.` : "",
       settings.book
-        ? 'Return one JSON object with "summary" (updated cumulative summary), "title" (brief title for the new events), "memory" (only significant new events), and "keys" (an array of 2–6 distinctive words or names that should recall the memory).'
+        ? 'Return one JSON object with four fields. "summary" is the updated cumulative summary as a string. When the new messages establish an event, decision, discovery, or change worth recalling, give it a short "title" and describe the new facts in "memory" as a string. Use "keys" as an array of 2–6 short phrases people might repeat to recall those specific facts. If there is nothing new to remember, use empty strings for "title" and "memory" and an empty array for "keys".'
         : "Return only the updated summary in plain text.",
     ].filter(Boolean).join("\n\n");
     const transcript = job.messages.map(message => {
@@ -49,8 +49,9 @@ export async function summarizeChat(chatId: string, job: NonNullable<ReturnType<
     try { value = JSON.parse(json); } catch { throw new Error("The summary model could not format a lorebook memory entry."); }
     if (typeof value?.summary !== "string" || !value.summary.trim()) throw new Error("The model omitted the updated summary.");
     const summary = limitTextTokens(value.summary.trim(), settings.output).slice(0, chatMemoryLimit);
-    const keys = Array.isArray(value.keys) ? [...new Set(value.keys.filter((key): key is string =>
-      typeof key === "string" && !!key.trim() && !key.trim().startsWith("/")).map(key => key.trim().slice(0, 80)))].slice(0, 12) : [];
+    const candidates: unknown[] = Array.isArray(value.keys) ? value.keys : typeof value.keys === "string" ? value.keys.split(",") : [];
+    const keys = [...new Set(candidates.filter((key): key is string =>
+      typeof key === "string" && !!key.trim() && !key.trim().startsWith("/")).map(key => key.trim().slice(0, 80)))].slice(0, 12);
     const memory = typeof value.memory === "string" ? limitTextTokens(value.memory.trim(), Math.min(800, settings.output)) : "";
     const entry = memory && keys.length ? { ...blankLoreEntry(), id: "memory-through-" + job.head, name: typeof value.title === "string" && value.title.trim() ? value.title.trim().slice(0, 100) : "Chat memory",
       keys, content: memory.slice(0, 4000), position: "after_char" as const, match_whole_words: true, excludeRecursion: true, preventRecursion: true } : undefined;
