@@ -8,7 +8,6 @@ import { expandNames } from "../lib/chat-text";
 import { AppAlert } from "./alerts";
 import { readResponse } from "./request";
 import { networkProblem } from "../lib/diagnostics";
-import { useHeaderJoin } from "./header-join";
 import type { Problem } from "../lib/diagnostics";
 import { MessageMarkdown } from "./chat-message";
 import { LorebookEditor } from "./lorebooks";
@@ -158,8 +157,6 @@ function CharacterLorebooks({ owner, selected, change }: {
 export function CharacterEditor({ item, player, pending, error, save }: {
   item?: Character; player: string; pending: boolean; error: Problem | null; save: (fields: object) => void;
 }) {
-  const form = useRef<HTMLFormElement>(null);
-  useHeaderJoin(form);
   const [name, setName] = useState(item?.name ?? "");
   const [description, setDescription] = useState(item?.description ?? "");
   const [tags, setTags] = useState(item?.tags ?? "");
@@ -178,7 +175,7 @@ export function CharacterEditor({ item, player, pending, error, save }: {
     save({ ...Object.fromEntries(fields), alternateGreetings: fields.getAll("alternateGreeting"), portrait, lorebookIds });
   }
 
-  return <form ref={form} className="character-editor" onSubmit={submit}>
+  return <form className="character-editor" onSubmit={submit}>
     <aside className="character-preview" aria-label="Character card preview">
       <h2>Card preview</h2>
       <article className="character-card">
