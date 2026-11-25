@@ -32,7 +32,9 @@ const fontFamilies: Record<keyof typeof chatFonts, string> = {
 export function chatTextStyle(view: ChatViewOptions): CSSProperties {
   return Object.fromEntries([
     ["--story-font", fontFamilies[view.font]], ["--story-size", (view.inheritSize ?? (view.size === 17)) ? "var(--dundra-chat-size, 17px)" : `${Math.max(12, Math.min(32, view.size))}px`],
-    ...chatColors.map(({ key }) => ["--story-" + key, view.colors[key]]),
+    ...chatColors.map(({ key }) => ["--story-" + key, view.colors[key] === defaultChatText.colors[key]
+      ? `var(--theme-story-${key}, ${defaultChatText.colors[key]})`
+      : view.colors[key]]),
   ]) as CSSProperties;
 }
 
@@ -283,12 +285,17 @@ export function ChatSettings({ preferences, advanced, chatId, locked, error, onC
       </div>
       <div className="chat-color-grid">
         {chatColors.map(({ key, label }) => {
-          const color = view.colors[key];
+          const usesThemeColor = view.colors[key] === defaultChatText.colors[key];
           const expanded = colorKey === key;
+          const customOpen = expanded && customColor === key;
+          const themeColorVar = "--theme-story-" + key;
+          const color = usesThemeColor && customOpen
+            ? getComputedStyle(document.documentElement).getPropertyValue(themeColorVar).trim() || view.colors[key]
+            : view.colors[key];
           const select = (next: string) => preview({ ...view, colors: { ...view.colors, [key]: next } });
           return <div key={key} className="ink-row">
             <button type="button" className="ink-trigger" aria-expanded={expanded} disabled={locked} onClick={() => setColorKey(expanded ? null : key)}>
-              <i style={{ backgroundColor: color }} /><span>{label}</span><code>{color.toUpperCase()}</code><ChevronDown size={14} />
+              <i style={{ backgroundColor: usesThemeColor ? `var(${themeColorVar}, ${color})` : color }} /><span>{label}</span><code>{usesThemeColor ? "Theme default" : color.toUpperCase()}</code><ChevronDown size={14} />
             </button>
             {expanded && <div className="ink-palette">
               {[["Ivory", "#fff1d6"], ["Pearl", "#f5efff"], ["Mist", "#c3c8da"], ["Lilac", "#d5b6ff"], ["Rose", "#ffb7d4"], ["Mint", "#a3e5d5"]].map(([name, hex]) =>
@@ -296,7 +303,7 @@ export function ChatSettings({ preferences, advanced, chatId, locked, error, onC
                   style={{ backgroundColor: hex }} onClick={() => select(hex)}>{color.toLowerCase() === hex && <Check size={14} />}</button>)}
               <button type="button" className="secondary" aria-expanded={customColor === key} disabled={locked}
                 onClick={() => setCustomColor(customColor === key ? null : key)}>Custom</button>
-              {customColor === key && <ColorPicker value={color} label={label} disabled={locked} change={select} />}
+              {customOpen && <ColorPicker value={color} label={label} disabled={locked} change={select} />}
             </div>}
           </div>;
         })}

@@ -1,25 +1,58 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Check, ChevronDown, Plus, X } from "lucide-react";
+import { ColorPicker } from "./color-picker";
 import { FontField, fontImportLimit, fontImportUrl, validFontName } from "./font-picker";
 
 const storageKey = "dundra-visual-settings";
-const schemes = [
-  { id: "plum", name: "Plum", color: "#24232e" },
-  { id: "graphite", name: "Graphite", color: "#252830" },
-  { id: "twilight", name: "Twilight", color: "#2c2338" },
+const themes = [
+  { id: "plum", name: "Plum", description: "Dundra’s original style", accent: "#d5b5f1" },
+  { id: "midnight", name: "Midnight", description: "Indigo panels and grouped navigation", accent: "#5865f2" },
+  { id: "mint", name: "Mint", description: "White surfaces and compact controls", accent: "#0c8c5e" },
 ] as const;
+type Theme = (typeof themes)[number]["id"];
+
+const displayOptions = [
+  { key: "density", label: "Library density", options: [["comfortable", "Comfortable"], ["compact", "Compact"]] },
+  { key: "chatWidth", label: "Chat width", options: [["standard", "Standard"], ["narrow", "Narrow"], ["wide", "Wide"]] },
+  { key: "corners", label: "Control corners", options: [["theme", "Theme default"], ["square", "Square"], ["rounded", "Rounded"]] },
+  { key: "motion", label: "Motion", options: [["system", "Follow device"], ["reduced", "Reduced"]] },
+] as const;
+type DisplayOptions = {
+  [Field in (typeof displayOptions)[number] as Field["key"]]: Field["options"][number][0];
+};
 
 const fontTargets = [["system", "Interface"], ["plain", "Chat text"], ["dialogue", "Dialogue"], ["italic", "Italics"], ["code", "Code"]] as const;
 type FontTarget = (typeof fontTargets)[number][0];
 const cssLimit = 60_000;
-type Visuals = { fonts: Partial<Record<FontTarget, string>>; imports: Record<string, string>; css: string; scheme: (typeof schemes)[number]["id"]; accent: string; size: number; chatSize: number; density: "comfortable" | "compact" };
-const defaults: Visuals = { fonts: {}, imports: {}, css: "", scheme: "plum", accent: "#d5b5f1", size: 16, chatSize: 17, density: "comfortable" };
+type Visuals = DisplayOptions & {
+  fonts: Partial<Record<FontTarget, string>>;
+  imports: Record<string, string>;
+  css: string;
+  scheme: Theme;
+  accents: Partial<Record<Theme, string>>;
+  size: number;
+  chatSize: number;
+};
+const defaults: Visuals = {
+  fonts: {}, imports: {}, css: "", scheme: "plum", accents: {}, size: 16, chatSize: 17,
+  density: "comfortable", chatWidth: "standard", corners: "theme", motion: "system",
+};
+const isHexColor = (color: unknown): color is string => typeof color === "string" && /^#[\da-f]{6}$/i.test(color);
 
 function readVisuals(): Visuals {
   try {
     const value = JSON.parse(localStorage.getItem(storageKey) ?? localStorage.getItem("nitanor-visual-settings") ?? "{}");
+    const scheme = value.scheme === "graphite" ? "midnight" : themes.find(item => item.id === value.scheme)?.id ?? defaults.scheme;
+    const accents: Visuals["accents"] = {};
+    for (const theme of themes) {
+      const accent = value.accents?.[theme.id];
+      if (isHexColor(accent)) accents[theme.id] = accent.toLowerCase();
+    }
+    if (!value.accents && isHexColor(value.accent) && value.accent.toLowerCase() !== "#d5b5f1") {
+      accents[scheme] = value.accent.toLowerCase();
+    }
     return {
       fonts: Object.fromEntries(fontTargets.flatMap(([key]) => typeof value.fonts?.[key] === "string" ? [[key, value.fonts[key].slice(0, 150)]] : [])),
       imports: Object.fromEntries(Object.entries(value.imports ?? {}).slice(0, fontImportLimit).flatMap(([name, source]) => {
@@ -27,11 +60,13 @@ function readVisuals(): Visuals {
         return url ? [[name, url]] : [];
       })),
       css: typeof value.css === "string" ? value.css.slice(0, cssLimit) : "",
-      scheme: schemes.find((item) => item.id === value.scheme)?.id || defaults.scheme,
-      accent: /^#[\da-f]{6}$/i.test(value.accent) ? value.accent : defaults.accent,
+      scheme, accents,
       size: Number.isInteger(value.size) && value.size >= 14 && value.size <= 20 ? value.size : defaults.size,
       chatSize: Number.isInteger(value.chatSize) && value.chatSize >= 12 && value.chatSize <= 32 ? value.chatSize : defaults.chatSize,
       density: value.density === "compact" ? "compact" : defaults.density,
+      chatWidth: value.chatWidth === "narrow" || value.chatWidth === "wide" ? value.chatWidth : defaults.chatWidth,
+      corners: value.corners === "square" || value.corners === "rounded" ? value.corners : defaults.corners,
+      motion: value.motion === "reduced" ? "reduced" : defaults.motion,
     };
   } catch { return defaults; }
 }
@@ -63,14 +98,25 @@ function applyVisuals(value: Visuals) {
   if (stylesheet && stylesheet.textContent !== value.css) stylesheet.textContent = value.css;
   root.dataset.scheme = value.scheme;
   root.dataset.density = value.density;
-  root.style.setProperty("--accent", value.accent);
+  root.dataset.chatWidth = value.chatWidth;
+  root.dataset.corners = value.corners;
+  root.dataset.motion = value.motion;
   root.style.setProperty("--dundra-chat-size", value.chatSize + "px");
   root.style.setProperty("--visual-font-size", value.size + "px");
-  const channels = value.accent.slice(1).match(/../g)!.map((part) => parseInt(part, 16) / 255);
+  const accent = value.accents[value.scheme];
+  root.toggleAttribute("data-custom-accent", Boolean(accent));
+  if (!accent) {
+    root.style.removeProperty("--accent");
+    root.style.removeProperty("--accent-ink");
+    root.style.removeProperty("--accent-hover");
+    return;
+  }
+  root.style.setProperty("--accent", accent);
+  const channels = accent.slice(1).match(/../g)!.map(part => parseInt(part, 16) / 255);
   const luminance = channels.map((part) => part <= .04045 ? part / 12.92 : ((part + .055) / 1.055) ** 2.4)
     .reduce((sum, part, index) => sum + part * [.2126, .7152, .0722][index], 0);
-  root.style.setProperty("--accent-ink", luminance > .18 ? "#141019" : "#ffffff");
-  root.style.setProperty("--accent-hover", "color-mix(in srgb, " + value.accent + " 90%, " + (luminance > .18 ? "white" : "black") + ")");
+  root.style.setProperty("--accent-ink", luminance > .179 ? "#000000" : "#ffffff");
+  root.style.setProperty("--accent-hover", `color-mix(in srgb, ${accent} 90%, ${luminance > .179 ? "white" : "black"})`);
 }
 
 export function useVisualPreferences() {
@@ -86,6 +132,7 @@ export function VisualSettings() {
   const [warning, setWarning] = useState("");
   const [draftCss, setDraftCss] = useState("");
   const [nextFont, setNextFont] = useState<FontTarget | "">("");
+  const [accentOpen, setAccentOpen] = useState(false);
   useEffect(() => {
     const saved = readVisuals();
     setValue(saved);
@@ -109,28 +156,64 @@ export function VisualSettings() {
       addImport={(font, url) => update({ ...value, fonts: { ...value.fonts, [target]: font }, imports: { ...value.imports, [font]: url } })} />;
   }
 
+  const theme = themes.find(item => item.id === value.scheme) ?? themes[0];
+  const customAccent = value.accents[theme.id];
+  const accent = customAccent ?? theme.accent;
+
   return <div className="settings-stack">
-    <section className="settings-panel">
-      <h2>Appearance</h2>
-      <p>Changes apply as you make them and are saved in this browser.</p>
+    <section className="settings-panel appearance-panel">
+      <div className="appearance-heading">
+        <h2>Appearance</h2>
+        <button type="button" className="quiet" onClick={() => {
+          update(defaults);
+          setDraftCss("");
+          setNextFont("");
+          setAccentOpen(false);
+        }}>Reset appearance</button>
+      </div>
       <fieldset className="theme-choices">
-        <legend>Color scheme</legend>
-        <div>{schemes.map((item) => <button key={item.id} type="button" aria-pressed={value.scheme === item.id}
-          className="theme-choice" onClick={() => update({ ...value, scheme: item.id })}>
-          <span style={{ background: item.color }} />{item.name}
-        </button>)}</div>
+        <legend>Theme</legend>
+        <div className="theme-grid">{themes.map(item => <label key={item.id} className="theme-choice">
+          <input type="radio" name="theme" className="sr-only" value={item.id} checked={value.scheme === item.id}
+            aria-label={item.name} onChange={() => update({ ...value, scheme: item.id })} />
+          <span className="theme-preview" data-scheme={item.id} aria-hidden="true">
+            <span className="theme-preview-bar"><i /><i /></span>
+            <span className="theme-preview-sidebar"><i /><i /></span>
+            <span className="theme-preview-content"><i /><i /><i /></span>
+          </span>
+          <span className="theme-caption"><strong>{item.name}</strong><Check size={16} aria-hidden="true" /></span>
+          <small>{item.description}</small>
+        </label>)}</div>
       </fieldset>
-      <div className="visual-row">
-        <label htmlFor="visual-accent">Accent color</label><input id="visual-accent" type="color" value={value.accent} onChange={(e) => update({ ...value, accent: e.target.value })} />
+      <div className="appearance-accent">
+        <div className="appearance-heading">
+          <h3>Accent color</h3>
+          <div className="appearance-accent-actions">
+            {customAccent && <button type="button" className="quiet" onClick={() => {
+              const accents = { ...value.accents };
+              delete accents[theme.id];
+              update({ ...value, accents });
+            }}>Use theme color</button>}
+            <button type="button" className="secondary accent-trigger" aria-expanded={accentOpen}
+              aria-label={`Customize accent color, ${accent.toUpperCase()}`}
+              onClick={() => setAccentOpen(!accentOpen)}>
+              <span style={{ background: accent }} />{accent.toUpperCase()}<ChevronDown size={14} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        {accentOpen && <ColorPicker key={theme.id} value={accent} label="Accent"
+          change={color => update({ ...value, accents: { ...value.accents, [theme.id]: color } })} />}
       </div>
-      <div className="visual-row">
-        <label htmlFor="visual-density">Library density</label>
-        <select id="visual-density" value={value.density} onChange={(e) => update({ ...value, density: e.target.value === "compact" ? "compact" : "comfortable" })}>
-          <option value="comfortable">Comfortable</option><option value="compact">Compact</option>
-        </select>
-      </div>
-      <button className="secondary" onClick={() => { update(defaults); setDraftCss(""); setNextFont(""); }}>Reset appearance</button>
       {warning && <p className="error" role="alert">{warning}</p>}
+    </section>
+    <section className="settings-panel display-panel">
+      <h2>Layout and motion</h2>
+      <div className="display-grid">{displayOptions.map(({ key, label, options }) => <div key={key}>
+        <label htmlFor={"visual-" + key}>{label}</label>
+        <select id={"visual-" + key} value={value[key]} onChange={event => update({ ...value, [key]: event.target.value })}>
+          {options.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+      </div>)}</div>
     </section>
     <section className="settings-panel typography-panel">
       <h2>Typography</h2>
@@ -139,7 +222,7 @@ export function VisualSettings() {
         const sizeKey = system ? "size" : "chatSize";
         const label = system ? "Interface" : "In-chat";
         return <fieldset className="type-specimen" key={target}><legend>{label}</legend>
-          <div className={"type-preview type-preview-" + target} style={{ fontSize: value[sizeKey], fontFamily: system ? "var(--dundra-font-system, system-ui)" : "var(--dundra-font-plain, Georgia, serif)" }}>
+          <div className={"type-preview type-preview-" + target} style={{ fontSize: value[sizeKey], fontFamily: system ? "var(--dundra-font-system, var(--interface-font))" : "var(--dundra-font-plain, Georgia, serif)" }}>
             {system ? "Character library" : "The lantern flickered."}
           </div>
           {fontField(target, label + " font")}

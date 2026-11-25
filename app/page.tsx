@@ -363,8 +363,10 @@ function Workspace() {
           aria-label={title} disabled={locked} onClick={() => visit(title)}><NavigationIcon name={icon} /><span className={title === "Import & export" ? "nav-long" : undefined}>{title}</span>
               {title === "Import & export" && <span className="nav-short">Transfer</span>}</button>)}
       </nav>
-      <button className="settings-link" aria-current={tab === "Settings" ? "page" : undefined}
-        aria-label="Settings" disabled={locked} onClick={() => visit("Settings")}><NavigationIcon name="settings" /><span>Settings</span></button>
+      <button type="button" className="settings-link" aria-current={tab === "Settings" ? "page" : undefined}
+        disabled={locked} onClick={() => visit("Settings")}>
+        <NavigationIcon name="settings" /><span>Settings</span>
+      </button>
     </header>
     <main id="workspace">
       {loading && <Notice>Opening your workspace…</Notice>}

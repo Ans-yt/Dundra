@@ -85,6 +85,6 @@ export function ColorPicker({ value, label, disabled, change }: {value: string; 
     <div className="spectrum-swatches">{["#ff6547","#ffe2bc","#ffbf46","#a8dfad","#43ccbc","#46aaf4","#8063ec","#f6bedb","#f5efff"].map(hex =>
       <button type="button" key={hex} style={{background:hex}} aria-label={label+" swatch "+hex} disabled={disabled} onClick={() => update(fromHex(hex,h))}/>)}</div>
     <div className="spectrum-contrast"><b style={{color:value,background}}>Aa</b><span>Text contrast <strong>{ratio.toFixed(2)}:1</strong></span>
-      <small title="Normal text contrast against the chat base color">{ratio >= 7 ? "AAA" : ratio >= 4.5 ? "AA" : "Low"}</small></div>
+      <small title="Normal text contrast against the page color">{ratio >= 7 ? "AAA" : ratio >= 4.5 ? "AA" : "Low"}</small></div>
   </div>;
 }

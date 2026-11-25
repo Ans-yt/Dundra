@@ -8,8 +8,9 @@ export function HtmlFragment({html}:{html:string}) {
   const [source,setSource]=useState("");
   useEffect(()=>{
     const safe=DOMPurify.sanitize(html,{FORCE_BODY:true,USE_PROFILES:{html:true,svg:true},FORBID_TAGS:["form","input","button","a","iframe","object","embed","base","link","meta","script"]});
-    const ink=getComputedStyle(frame.current!).color;
-    setSource(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"><style>*{box-sizing:border-box}html,body{margin:0;background:transparent}html{color-scheme:dark}body{display:flow-root;color:${ink};font:16px/1.5 system-ui;overflow-wrap:anywhere}img{max-width:100%}</style>`+safe);
+    const { color: ink, colorScheme } = getComputedStyle(frame.current!);
+    const scheme = colorScheme === "light" ? "light" : "dark";
+    setSource(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"><style>*{box-sizing:border-box}html,body{margin:0;background:transparent}html{color-scheme:${scheme}}body{display:flow-root;color:${ink};font:16px/1.5 system-ui;overflow-wrap:anywhere}img{max-width:100%}</style>`+safe);
     return ()=>observer.current?.disconnect();
   },[html]);
   return <iframe ref={frame} className="message-html" title="Formatted message" sandbox="allow-same-origin" referrerPolicy="no-referrer" srcDoc={source} onLoad={()=>{
